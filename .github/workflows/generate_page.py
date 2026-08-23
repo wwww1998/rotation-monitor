@@ -554,9 +554,9 @@ td:first-child {{ text-align: left; font-weight: 600; }}
       <svg viewBox="0 0 {TW} {TH}" xmlns="http://www.w3.org/2000/svg">
         {tr_grid_lines}
         <line x1="{t_pad_l}" y1="{buy_line_y:.1f}" x2="{TW - t_pad_r}" y2="{buy_line_y:.1f}" stroke="#4caf50" stroke-width="1.5" stroke-dasharray="6,3"/>
-        <text x="{TW - t_pad_r - 3}" y="{buy_line_y + 4:.1f}" text-anchor="end" font-size="10" fill="#4caf50">卖出红利 买入创业板 20%</text>
+        <text x="{TW - t_pad_r - 1}" y="{buy_line_y + 6:.1f}" text-anchor="end" font-size="10" fill="#4caf50">卖出红利 买入创业板 20%</text>
         <line x1="{t_pad_l}" y1="{sell_line_y:.1f}" x2="{TW - t_pad_r}" y2="{sell_line_y:.1f}" stroke="#f44336" stroke-width="1.5" stroke-dasharray="6,3"/>
-        <text x="{TW - t_pad_r - 3}" y="{sell_line_y + 4:.1f}" text-anchor="end" font-size="10" fill="#f44336">买入红利 卖出创业板 40%</text>
+        <text x="{TW - t_pad_r - 1}" y="{sell_line_y + 2:.1f}" text-anchor="end" font-size="10" fill="#f44336">买入红利 卖出创业板 40%</text>
         <polygon points="{tr_area}" fill="rgba(37, 99, 235, 0.1)"/>
         <polyline points="{tr_pts}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round"/>
         {tr_y_labels}
