@@ -138,9 +138,9 @@ def generate_chart(nav_df, trades, max_dd):
     ax1.plot(dates, cyb / 1e6, color='#e74c3c', linewidth=1.5, linestyle='--', alpha=0.7, label='创业板（持有）')
     ax1.plot(dates, hldb / 1e6, color='#10b981', linewidth=1.5, linestyle='-.', alpha=0.7, label='红利低波（持有）')
 
-    # 买卖标记
+    # 买卖标记（向左偏移7天，避免遮挡线）
     for t in trades:
-        td = t['date']
+        td = t['date'] - timedelta(days=7)
         tv = t['nav'] / 1e6
         is_buy = "红利低波→创业板" in t['action']
         color = '#4caf50' if is_buy else '#f44336'
@@ -171,7 +171,7 @@ def generate_chart(nav_df, trades, max_dd):
     ax2.plot(dates, ratios, color='#2563eb', linewidth=2, label='创业板/红利低波 比值(%)')
 
     for t in trades:
-        td = t['date']
+        td = t['date'] - timedelta(days=7)
         tr = t['ratio'] * 100
         is_buy = "红利低波→创业板" in t['action']
         color = '#4caf50' if is_buy else '#f44336'
@@ -338,6 +338,36 @@ def generate_page():
         idx = int((i / 6) * (len(trend_1y) - 1))
         xx = tx(idx)
         tr_x_labels += f'<text x="{xx:.1f}" y="{TH - 4}" text-anchor="middle" font-size="10" fill="#6b7a8f">{trend_1y.iloc[idx]["date"].strftime("%m-%d")}</text>\n'
+
+    # 2025年全年比值趋势SVG
+    d2025 = merged[(merged["date"] >= "2025-01-01") & (merged["date"] <= "2025-12-31")].copy().reset_index(drop=True)
+    y25_min = d2025["ratio"].min() * 100
+    y25_max = d2025["ratio"].max() * 100
+    y25_pad = (y25_max - y25_min) * 0.1 or 5
+    y25_y_min = y25_min - y25_pad
+    y25_y_max = y25_max + y25_pad
+    TW25, TH25 = 800, 240
+    def t25x(idx): return t_pad_l + (idx / (len(d2025) - 1)) * t_plot_w
+    def t25y(val_pct):
+        rng = y25_y_max - y25_y_min if y25_y_max > y25_y_min else 1
+        return t_pad_t + t_plot_h - ((val_pct - y25_y_min) / rng) * t_plot_h
+    y25_pts = " ".join(f"{t25x(i):.1f},{t25y(row['ratio']*100):.1f}" for i, (_, row) in enumerate(d2025.iterrows()))
+    y25_area_bottom = t_pad_t + t_plot_h
+    y25_area = f"{t25x(0):.1f},{y25_area_bottom:.1f} {y25_pts} {t25x(len(d2025)-1):.1f},{y25_area_bottom:.1f}"
+    y25_buy_line_y = t25y(20); y25_sell_line_y = t25y(40)
+    y25_grid = ""; y25_ylabels = ""
+    for i in range(5):
+        val_pct = y25_y_max - (i / 4) * (y25_y_max - y25_y_min)
+        yy = t25y(val_pct)
+        y25_grid += f'<line x1="{t_pad_l}" y1="{yy:.1f}" x2="{TW25 - t_pad_r}" y2="{yy:.1f}" stroke="#e2e8f0" stroke-width="1"/>\n'
+        y25_ylabels += f'<text x="{t_pad_l - 8}" y="{yy + 4:.1f}" text-anchor="end" font-size="11" fill="#6b7a8f">{val_pct:.1f}%</text>\n'
+    y25_xlabels = ""
+    for i in range(7):
+        idx = int((i / 6) * (len(d2025) - 1))
+        xx = t25x(idx)
+        y25_xlabels += f'<text x="{xx:.1f}" y="{TH25 - 4}" text-anchor="middle" font-size="10" fill="#6b7a8f">{d2025.iloc[idx]["date"].strftime("%m-%d")}</text>\n'
+    y25_ratio_avg = d2025["ratio"].mean() * 100
+    y25_ratio_mid = d2025["ratio"].median() * 100
 
     # 表格行
     recent_rows = ""
@@ -535,7 +565,31 @@ td:first-child {{ text-align: left; font-weight: 600; }}
     </div>
   </div>
 
-  <!-- 三面板回测图 -->
+  <!-- 2025年全年比值趋势 -->
+	  <div class="section">
+	    <div class="section-title">2025年全年比值趋势</div>
+	    <div class="stats-grid" style="margin-bottom:12px;">
+	      <div class="stat-card"><div class="stat-label">2025年比值范围</div><div class="stat-value" style="font-size:18px;">{y25_min:.2f}% ~ {y25_max:.2f}%</div></div>
+	      <div class="stat-card"><div class="stat-label">平均比值</div><div class="stat-value" style="font-size:18px;">{y25_ratio_avg:.2f}%</div></div>
+	      <div class="stat-card"><div class="stat-label">中位数比值</div><div class="stat-value" style="font-size:18px;">{y25_ratio_mid:.2f}%</div></div>
+	      <div class="stat-card"><div class="stat-label">交易天数</div><div class="stat-value" style="font-size:18px;">{len(d2025)}</div></div>
+	    </div>
+	    <div class="axis-chart" style="padding:10px 0;">
+	      <svg viewBox="0 0 {TW25} {TH25}" xmlns="http://www.w3.org/2000/svg">
+	        {y25_grid}
+	        <line x1="{t_pad_l}" y1="{y25_buy_line_y:.1f}" x2="{TW25 - t_pad_r}" y2="{y25_buy_line_y:.1f}" stroke="#4caf50" stroke-width="1.5" stroke-dasharray="6,3"/>
+	        <text x="{TW25 - t_pad_r + 4}" y="{y25_buy_line_y + 4:.1f}" font-size="10" fill="#4caf50">卖出红利 买入创业板 20%</text>
+	        <line x1="{t_pad_l}" y1="{y25_sell_line_y:.1f}" x2="{TW25 - t_pad_r}" y2="{y25_sell_line_y:.1f}" stroke="#f44336" stroke-width="1.5" stroke-dasharray="6,3"/>
+	        <text x="{TW25 - t_pad_r + 4}" y="{y25_sell_line_y + 4:.1f}" font-size="10" fill="#f44336">买入红利 卖出创业板 40%</text>
+	        <polygon points="{y25_area}" fill="rgba(37, 99, 235, 0.1)"/>
+	        <polyline points="{y25_pts}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round"/>
+	        {y25_ylabels}
+	        {y25_xlabels}
+	      </svg>
+	    </div>
+	  </div>
+
+	  <!-- 三面板回测图 -->
   <div class="chart-wrap">
     <div class="section-title">轮动策略 vs 持有策略 收益对比（初始资产 100万元）</div>
     {chart_svg}
