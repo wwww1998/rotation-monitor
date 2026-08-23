@@ -53,22 +53,22 @@ def pct_str(val):
 
 # ─── 回测引擎 ───────────────────────────────────────────────────
 def run_backtest(data):
+    # 先用全量数据（2010年起）计算分位数，确保回测起始日有足够历史
+    # 注意：expanding(）包含当前值，不产生超前偏差
+    data['ratio_pctile'] = data['ratio'].expanding().rank(pct=True)
+
     bd = data[(data['date'] >= BACKTEST_START)].copy().reset_index(drop=True)
     if len(bd) < 20: return None, None, None
 
-    # 计算每个时点的历史分位数（无超前偏差）
-    # 对每个交易日，用此前所有历史数据计算当前比值的百分位
-    bd['ratio_pctile'] = bd['ratio'].expanding().rank(pct=True)
+    # 全历史分位数阈值（用于图表显示）
+    pctile_20_val = data['ratio'].quantile(0.20)
+    pctile_80_val = data['ratio'].quantile(0.80)
 
     position = 'hldb'
     shares_cyb = 0.0
     shares_hldb = INITIAL_CAPITAL / bd.iloc[0]['close_hldb']
     cyb_start = bd.iloc[0]['close_cyb']
     hldb_start = bd.iloc[0]['close_hldb']
-
-    # 全历史分位数阈值（用于图表显示）
-    pctile_20_val = data['ratio'].quantile(0.20)
-    pctile_80_val = data['ratio'].quantile(0.80)
 
     nav_daily = []
     for _, row in bd.iterrows():
