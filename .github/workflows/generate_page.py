@@ -326,15 +326,14 @@ def generate_page():
     dd_svg_y = [dd_vals[i] for i in dd_svg_idx]
 
     dd_ylim = min(dd_vals) * 1.1
-    dd_pts = " ".join(f"{sx(dd_svg_x[i]):.1f},{sy2(dd_svg_y[i]):.1f}" for i in range(len(dd_svg_idx)))
-    # 定义 sy2 在 dd 坐标下
     pad_t2, pad_b2 = 20, 30
     plot_h2 = H2 - pad_t2 - pad_b2
+    dd_range = 0 - dd_ylim if 0 > dd_ylim else 1
 
     def sy2(v):
-        return pad_t2 + plot_h2 - ((v - dd_ylim) / (0 - dd_ylim if 0 > dd_ylim else 1)) * plot_h2
+        return pad_t2 + plot_h2 - ((v - dd_ylim) / dd_range) * plot_h2
 
-    # 重算 dd_pts 和 area
+    # 计算 dd_pts 和 area
     dd_pts = " ".join(f"{sx(dd_svg_x[i]):.1f},{sy2(dd_svg_y[i]):.1f}" for i in range(len(dd_svg_idx)))
     area_bottom = sy2(0)
     first_x = sx(dd_svg_x[0])
