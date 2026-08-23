@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>指数轮动策略监控</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: #333; padding: 20px; }
+    .container { max-width: 800px; margin: 0 auto; }
+    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; padding: 30px; border-radius: 16px; margin-bottom: 20px; text-align: center; }
+    .header h1 { font-size: 24px; margin-bottom: 8px; }
+    .header .update-time { font-size: 13px; opacity: 0.8; }
+    .signal-card { background: #fff; border-radius: 16px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .signal-badge { display: inline-block; padding: 8px 20px; border-radius: 20px; font-size: 18px; font-weight: 600; }
+    .signal-badge.buy-cyb { background: #e6f7ff; color: #1890ff; border: 1px solid #91d5ff; }
+    .signal-badge.buy-hldb { background: #fff7e6; color: #fa8c16; border: 1px solid #ffd591; }
+    .signal-badge.hold-cyb { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; }
+    .signal-badge.hold-hldb { background: #fffbe6; color: #fadb14; border: 1px solid #ffe58f; }
+    .signal-text { margin-top: 12px; font-size: 14px; color: #666; line-height: 1.6; }
+    .data-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+    .data-item { background: #fff; border-radius: 12px; padding: 16px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .data-item .label { font-size: 12px; color: #999; margin-bottom: 4px; }
+    .data-item .value { font-size: 20px; font-weight: 600; }
+    .data-item .value.cyb { color: #e74c3c; }
+    .data-item .value.hldb { color: #2ecc71; }
+    .data-item .value.ratio { color: #667eea; }
+    .chart-container { background: #fff; border-radius: 16px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .chart-container h3 { font-size: 16px; margin-bottom: 16px; color: #333; }
+    .chart { width: 100%; height: 300px; }
+    .chart-bar { display: flex; align-items: flex-end; height: 250px; gap: 2px; }
+    .bar { flex: 1; min-width: 3px; background: linear-gradient(to top, #667eea, #764ba2); border-radius: 2px 2px 0 0; position: relative; }
+    .bar.above40 { background: linear-gradient(to top, #e74c3c, #c0392b); }
+    .bar.below20 { background: linear-gradient(to top, #3498db, #2980b9); }
+    .bar.equals30 { background: linear-gradient(to top, #f39c12, #e67e22); }
+    .threshold-lines { position: relative; height: 0; }
+    .info-text { font-size: 12px; color: #999; text-align: center; margin-top: 8px; }
+    .footer { text-align: center; font-size: 12px; color: #bbb; padding: 20px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>指数轮动策略监控</h1>
+        <p>创业板指 vs 中证红利低波动指数</p>
+        <div class="update-time">更新时间: 2026-08-23 06:22:53</div>
+    </div>
+
+    <div class="signal-card">
+        <div style="text-align: center;">
+            <div class="signal-badge hold-hldb">建议持有红利低波</div>
+            <div class="signal-text">比值 32.65%，处于20%-40%观望区间，偏红利低波方向。</div>
+        </div>
+    </div>
+
+    <div class="data-grid">
+        <div class="data-item">
+            <div class="label">创业板指</div>
+            <div class="value cyb">3545.58</div>
+        </div>
+        <div class="data-item">
+            <div class="label">红利低波</div>
+            <div class="value hldb">10858.77</div>
+        </div>
+        <div class="data-item">
+            <div class="label">比值 (创业板/红利低波)</div>
+            <div class="value ratio">32.65%</div>
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <h3>近120日比值趋势</h3>
+        <div style="position: relative;">
+            <div style="position: absolute; top: 0; left: 0; right: 0; height: 250px; pointer-events: none;">
+                <div style="position: absolute; top: 0; left: 0; right: 0; border-top: 1px dashed #e74c3c; text-align: right; font-size: 11px; color: #e74c3c; padding-right: 4px;">40%</div>
+                <div style="position: absolute; top: 50%; left: 0; right: 0; border-top: 1px dashed #f39c12;"></div>
+                <div style="position: absolute; bottom: 0; left: 0; right: 0; border-top: 1px dashed #3498db; text-align: right; font-size: 11px; color: #3498db; padding-right: 4px;">20%</div>
+            </div>
+            <div class="chart-bar" id="chart-bars">
+                <div class="bar" style="height: 9.73618090452262%;" title="2026-03-02: 29.1%"></div>
+                <div class="bar" style="height: 5%;" title="2026-03-03: 28.09%"></div>
+                <div class="bar" style="height: 5%;" title="2026-03-04: 28.05%"></div>
+                <div class="bar" style="height: 5.590452261306536%;" title="2026-03-05: 28.44%"></div>
+                <div class="bar" style="height: 5.402010050251254%;" title="2026-03-06: 28.41%"></div>
+                <div class="bar" style="height: 5%;" title="2026-03-09: 28.21%"></div>
+                <div class="bar" style="height: 10.050251256281395%;" title="2026-03-10: 29.15%"></div>
+                <div class="bar" style="height: 10.489949748743708%;" title="2026-03-11: 29.22%"></div>
+                <div class="bar" style="height: 7.726130653266335%;" title="2026-03-12: 28.78%"></div>
+                <div class="bar" style="height: 6.972361809045223%;" title="2026-03-13: 28.66%"></div>
+                <div class="bar" style="height: 9.547738693467336%;" title="2026-03-16: 29.07%"></div>
+                <div class="bar" style="height: 5%;" title="2026-03-17: 28.34%"></div>
+                <div class="bar" style="height: 9.233668341708537%;" title="2026-03-18: 29.02%"></div>
+                <div class="bar" style="height: 7.914572864321596%;" title="2026-03-19: 28.81%"></div>
+                <div class="bar" style="height: 10.866834170854275%;" title="2026-03-20: 29.28%"></div>
+                <div class="bar" style="height: 10.804020100502507%;" title="2026-03-23: 29.27%"></div>
+                <div class="bar" style="height: 8.040201005025112%;" title="2026-03-24: 28.83%"></div>
+                <div class="bar" style="height: 10.364321608040193%;" title="2026-03-25: 29.2%"></div>
+                <div class="bar" style="height: 8.040201005025112%;" title="2026-03-26: 28.83%"></div>
+                <div class="bar" style="height: 9.987437185929648%;" title="2026-03-27: 29.14%"></div>
+                <div class="bar" style="height: 6.972361809045223%;" title="2026-03-30: 28.66%"></div>
+                <div class="bar" style="height: 5%;" title="2026-03-31: 27.8%"></div>
+                <div class="bar" style="height: 5%;" title="2026-04-01: 28.32%"></div>
+                <div class="bar" style="height: 5%;" title="2026-04-02: 27.55%"></div>
+                <div class="bar" style="height: 5%;" title="2026-04-03: 27.74%"></div>
+                <div class="bar" style="height: 5%;" title="2026-04-07: 27.99%"></div>
+                <div class="bar" style="height: 11.369346733668335%;" title="2026-04-08: 29.36%"></div>
+                <div class="bar" style="height: 11.432160804020103%;" title="2026-04-09: 29.37%"></div>
+                <div class="bar" style="height: 18.530150753768844%;" title="2026-04-10: 30.5%"></div>
+                <div class="bar" style="height: 20.66582914572864%;" title="2026-04-13: 30.84%"></div>
+                <div class="bar" style="height: 24.43467336683418%;" title="2026-04-14: 31.44%"></div>
+                <div class="bar" style="height: 20.791457286432156%;" title="2026-04-15: 30.86%"></div>
+                <div class="bar" style="height: 26.94723618090452%;" title="2026-04-16: 31.84%"></div>
+                <div class="bar" style="height: 30.339195979899515%;" title="2026-04-17: 32.38%"></div>
+                <div class="bar" style="height: 29.52261306532663%;" title="2026-04-20: 32.25%"></div>
+                <div class="bar" style="height: 29.020100502512573%;" title="2026-04-21: 32.17%"></div>
+                <div class="bar" style="height: 33.41708542713566%;" title="2026-04-22: 32.87%"></div>
+                <div class="bar" style="height: 30.339195979899515%;" title="2026-04-23: 32.38%"></div>
+                <div class="bar" style="height: 27.763819095477377%;" title="2026-04-24: 31.97%"></div>
+                <div class="bar" style="height: 28.768844221105542%;" title="2026-04-27: 32.13%"></div>
+                <div class="bar" style="height: 25.188442211055268%;" title="2026-04-28: 31.56%"></div>
+                <div class="bar" style="height: 29.585427135678376%;" title="2026-04-29: 32.26%"></div>
+                <div class="bar" style="height: 30.967336683417063%;" title="2026-04-30: 32.48%"></div>
+                <div class="bar" style="height: 37.56281407035176%;" title="2026-05-06: 33.53%"></div>
+                <div class="bar" style="height: 41.39447236180905%;" title="2026-05-07: 34.14%"></div>
+                <div class="bar" style="height: 39.44723618090451%;" title="2026-05-08: 33.83%"></div>
+                <div class="bar" style="height: 46.85929648241205%;" title="2026-05-11: 35.01%"></div>
+                <div class="bar" style="height: 47.36180904522615%;" title="2026-05-12: 35.09%"></div>
+                <div class="bar" style="height: 53.14070351758793%;" title="2026-05-13: 36.01%"></div>
+                <div class="bar" style="height: 48.68090452261305%;" title="2026-05-14: 35.3%"></div>
+                <div class="bar" style="height: 48.99497487437187%;" title="2026-05-15: 35.35%"></div>
+                <div class="bar" style="height: 49.497487437185924%;" title="2026-05-18: 35.43%"></div>
+                <div class="bar" style="height: 47.675879396984925%;" title="2026-05-19: 35.14%"></div>
+                <div class="bar" style="height: 49.18341708542716%;" title="2026-05-20: 35.38%"></div>
+                <div class="bar" style="height: 45.41457286432162%;" title="2026-05-21: 34.78%"></div>
+                <div class="bar" style="height: 52.32412060301509%;" title="2026-05-22: 35.88%"></div>
+                <div class="bar" style="height: 57.41206030150753%;" title="2026-05-25: 36.69%"></div>
+                <div class="bar" style="height: 58.040201005025125%;" title="2026-05-26: 36.79%"></div>
+                <div class="bar" style="height: 59.73618090452263%;" title="2026-05-27: 37.06%"></div>
+                <div class="bar" style="height: 65.38944723618091%;" title="2026-05-28: 37.96%"></div>
+                <div class="bar" style="height: 55.778894472361806%;" title="2026-05-29: 36.43%"></div>
+                <div class="bar" style="height: 47.675879396984925%;" title="2026-06-01: 35.14%"></div>
+                <div class="bar" style="height: 53.894472361809065%;" title="2026-06-02: 36.13%"></div>
+                <div class="bar" style="height: 59.673366834170835%;" title="2026-06-03: 37.05%"></div>
+                <div class="bar" style="height: 60.67839195979901%;" title="2026-06-04: 37.21%"></div>
+                <div class="bar" style="height: 52.57537688442212%;" title="2026-06-05: 35.92%"></div>
+                <div class="bar" style="height: 43.65577889447236%;" title="2026-06-08: 34.5%"></div>
+                <div class="bar" style="height: 52.13567839195981%;" title="2026-06-09: 35.85%"></div>
+                <div class="bar" style="height: 44.91206030150756%;" title="2026-06-10: 34.7%"></div>
+                <div class="bar" style="height: 44.22110552763821%;" title="2026-06-11: 34.59%"></div>
+                <div class="bar" style="height: 43.40452261306533%;" title="2026-06-12: 34.46%"></div>
+                <div class="bar" style="height: 57.22361809045224%;" title="2026-06-15: 36.66%"></div>
+                <div class="bar" style="height: 64.82412060301506%;" title="2026-06-16: 37.87%"></div>
+                <div class="bar" style="height: 69.97487437185929%;" title="2026-06-17: 38.69%"></div>
+                <div class="bar above40" style="height: 81.53266331658293%;" title="2026-06-18: 40.53%"></div>
+                <div class="bar above40" style="height: 87.68844221105527%;" title="2026-06-22: 41.51%"></div>
+                <div class="bar" style="height: 76.3819095477387%;" title="2026-06-23: 39.71%"></div>
+                <div class="bar above40" style="height: 85.05025125628143%;" title="2026-06-24: 41.09%"></div>
+                <div class="bar above40" style="height: 95.47738693467338%;" title="2026-06-25: 42.75%"></div>
+                <div class="bar above40" style="height: 86.43216080402011%;" title="2026-06-26: 41.31%"></div>
+                <div class="bar above40" style="height: 86.49497487437186%;" title="2026-06-29: 41.32%"></div>
+                <div class="bar above40" style="height: 100%;" title="2026-06-30: 43.47%"></div>
+                <div class="bar above40" style="height: 92.0854271356784%;" title="2026-07-01: 42.21%"></div>
+                <div class="bar" style="height: 75.00000000000003%;" title="2026-07-02: 39.49%"></div>
+                <div class="bar" style="height: 74.62311557788945%;" title="2026-07-03: 39.43%"></div>
+                <div class="bar" style="height: 65.26381909547737%;" title="2026-07-06: 37.94%"></div>
+                <div class="bar" style="height: 64.57286432160804%;" title="2026-07-07: 37.83%"></div>
+                <div class="bar" style="height: 58.103015075376874%;" title="2026-07-08: 36.8%"></div>
+                <div class="bar" style="height: 71.35678391959797%;" title="2026-07-09: 38.91%"></div>
+                <div class="bar" style="height: 60.67839195979901%;" title="2026-07-10: 37.21%"></div>
+                <div class="bar" style="height: 50.06281407035178%;" title="2026-07-13: 35.52%"></div>
+                <div class="bar" style="height: 55.71608040201006%;" title="2026-07-14: 36.42%"></div>
+                <div class="bar" style="height: 50.125628140703526%;" title="2026-07-15: 35.53%"></div>
+                <div class="bar" style="height: 45.6030150753769%;" title="2026-07-16: 34.81%"></div>
+                <div class="bar" style="height: 29.459798994974882%;" title="2026-07-17: 32.24%"></div>
+                <div class="bar" style="height: 25.125628140703522%;" title="2026-07-20: 31.55%"></div>
+                <div class="bar" style="height: 41.959798994974854%;" title="2026-07-21: 34.23%"></div>
+                <div class="bar" style="height: 33.919597989949764%;" title="2026-07-22: 32.95%"></div>
+                <div class="bar" style="height: 33.5427135678392%;" title="2026-07-23: 32.89%"></div>
+                <div class="bar" style="height: 29.836683417085407%;" title="2026-07-24: 32.3%"></div>
+                <div class="bar" style="height: 35.42713567839195%;" title="2026-07-27: 33.19%"></div>
+                <div class="bar" style="height: 18.65577889447236%;" title="2026-07-28: 30.52%"></div>
+                <div class="bar" style="height: 19.84924623115578%;" title="2026-07-29: 30.71%"></div>
+                <div class="bar" style="height: 9.359296482412052%;" title="2026-07-30: 29.04%"></div>
+                <div class="bar" style="height: 15.766331658291447%;" title="2026-07-31: 30.06%"></div>
+                <div class="bar" style="height: 13.190954773869334%;" title="2026-08-03: 29.65%"></div>
+                <div class="bar" style="height: 28.015075376884408%;" title="2026-08-04: 32.01%"></div>
+                <div class="bar" style="height: 33.22864321608042%;" title="2026-08-05: 32.84%"></div>
+                <div class="bar" style="height: 31.783919597989946%;" title="2026-08-06: 32.61%"></div>
+                <div class="bar" style="height: 35.80402010050251%;" title="2026-08-07: 33.25%"></div>
+                <div class="bar" style="height: 33.5427135678392%;" title="2026-08-10: 32.89%"></div>
+                <div class="bar" style="height: 34.1708542713568%;" title="2026-08-11: 32.99%"></div>
+                <div class="bar" style="height: 38.190954773869365%;" title="2026-08-12: 33.63%"></div>
+                <div class="bar" style="height: 37.56281407035176%;" title="2026-08-13: 33.53%"></div>
+                <div class="bar" style="height: 40.70351758793971%;" title="2026-08-14: 34.03%"></div>
+                <div class="bar" style="height: 46.7964824120603%;" title="2026-08-17: 35.0%"></div>
+                <div class="bar" style="height: 43.96984924623114%;" title="2026-08-18: 34.55%"></div>
+                <div class="bar" style="height: 28.015075376884408%;" title="2026-08-19: 32.01%"></div>
+                <div class="bar" style="height: 28.0778894472362%;" title="2026-08-20: 32.02%"></div>
+                <div class="bar" style="height: 32.035175879396974%;" title="2026-08-21: 32.65%"></div>
+            </div>
+        </div>
+        <div class="info-text">颜色说明: 蓝色(比值<20%) | 橙色(正常区间) | 红色(比值>40%)</div>
+    </div>
+
+    <div class="footer">
+        数据来源: AKShare · 策略: 指数轮动 · 自动每日更新
+    </div>
+</div>
+</body>
+</html>
