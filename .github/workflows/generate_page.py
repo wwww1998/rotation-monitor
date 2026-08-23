@@ -138,9 +138,9 @@ def generate_chart(nav_df, trades, max_dd):
     ax1.plot(dates, cyb / 1e6, color='#e74c3c', linewidth=1.5, linestyle='--', alpha=0.7, label='创业板（持有）')
     ax1.plot(dates, hldb / 1e6, color='#10b981', linewidth=1.5, linestyle='-.', alpha=0.7, label='红利低波（持有）')
 
-    # 买卖标记（向左偏移7天，避免遮挡线）
+    # 买卖标记
     for t in trades:
-        td = t['date'] - timedelta(days=7)
+        td = t['date']
         tv = t['nav'] / 1e6
         is_buy = "红利低波→创业板" in t['action']
         color = '#4caf50' if is_buy else '#f44336'
@@ -171,7 +171,7 @@ def generate_chart(nav_df, trades, max_dd):
     ax2.plot(dates, ratios, color='#2563eb', linewidth=2, label='创业板/红利低波 比值(%)')
 
     for t in trades:
-        td = t['date'] - timedelta(days=7)
+        td = t['date']
         tr = t['ratio'] * 100
         is_buy = "红利低波→创业板" in t['action']
         color = '#4caf50' if is_buy else '#f44336'
@@ -554,9 +554,9 @@ td:first-child {{ text-align: left; font-weight: 600; }}
       <svg viewBox="0 0 {TW} {TH}" xmlns="http://www.w3.org/2000/svg">
         {tr_grid_lines}
         <line x1="{t_pad_l}" y1="{buy_line_y:.1f}" x2="{TW - t_pad_r}" y2="{buy_line_y:.1f}" stroke="#4caf50" stroke-width="1.5" stroke-dasharray="6,3"/>
-        <text x="{TW - t_pad_r + 4}" y="{buy_line_y + 4:.1f}" font-size="10" fill="#4caf50">卖出红利 买入创业板 20%</text>
+        <text x="{t_pad_l - 4}" y="{buy_line_y + 4:.1f}" text-anchor="end" font-size="10" fill="#4caf50">卖出红利 买入创业板 20%</text>
         <line x1="{t_pad_l}" y1="{sell_line_y:.1f}" x2="{TW - t_pad_r}" y2="{sell_line_y:.1f}" stroke="#f44336" stroke-width="1.5" stroke-dasharray="6,3"/>
-        <text x="{TW - t_pad_r + 4}" y="{sell_line_y + 4:.1f}" font-size="10" fill="#f44336">买入红利 卖出创业板 40%</text>
+        <text x="{t_pad_l - 4}" y="{sell_line_y + 4:.1f}" text-anchor="end" font-size="10" fill="#f44336">买入红利 卖出创业板 40%</text>
         <polygon points="{tr_area}" fill="rgba(37, 99, 235, 0.1)"/>
         <polyline points="{tr_pts}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round"/>
         {tr_y_labels}
@@ -578,9 +578,9 @@ td:first-child {{ text-align: left; font-weight: 600; }}
 	      <svg viewBox="0 0 {TW25} {TH25}" xmlns="http://www.w3.org/2000/svg">
 	        {y25_grid}
 	        <line x1="{t_pad_l}" y1="{y25_buy_line_y:.1f}" x2="{TW25 - t_pad_r}" y2="{y25_buy_line_y:.1f}" stroke="#4caf50" stroke-width="1.5" stroke-dasharray="6,3"/>
-	        <text x="{TW25 - t_pad_r + 4}" y="{y25_buy_line_y + 4:.1f}" font-size="10" fill="#4caf50">卖出红利 买入创业板 20%</text>
-	        <line x1="{t_pad_l}" y1="{y25_sell_line_y:.1f}" x2="{TW25 - t_pad_r}" y2="{y25_sell_line_y:.1f}" stroke="#f44336" stroke-width="1.5" stroke-dasharray="6,3"/>
-	        <text x="{TW25 - t_pad_r + 4}" y="{y25_sell_line_y + 4:.1f}" font-size="10" fill="#f44336">买入红利 卖出创业板 40%</text>
+        <text x="{t_pad_l - 4}" y="{y25_buy_line_y + 4:.1f}" text-anchor="end" font-size="10" fill="#4caf50">卖出红利 买入创业板 20%</text>
+        <line x1="{t_pad_l}" y1="{y25_sell_line_y:.1f}" x2="{TW25 - t_pad_r}" y2="{y25_sell_line_y:.1f}" stroke="#f44336" stroke-width="1.5" stroke-dasharray="6,3"/>
+        <text x="{t_pad_l - 4}" y="{y25_sell_line_y + 4:.1f}" text-anchor="end" font-size="10" fill="#f44336">买入红利 卖出创业板 40%</text>
 	        <polygon points="{y25_area}" fill="rgba(37, 99, 235, 0.1)"/>
 	        <polyline points="{y25_pts}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round"/>
 	        {y25_ylabels}
