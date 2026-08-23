@@ -308,10 +308,10 @@ def generate_page():
     # 近5日数据
     recent_5 = merged.tail(5).iloc[::-1]
 
-    # 60日趋势SVG
-    trend_60 = merged.tail(60).reset_index(drop=True)
-    tr_min = trend_60["ratio"].min() * 100
-    tr_max = trend_60["ratio"].max() * 100
+    # 1年趋势SVG（约250个交易日）
+    trend_1y = merged.tail(250).reset_index(drop=True)
+    tr_min = trend_1y["ratio"].min() * 100
+    tr_max = trend_1y["ratio"].max() * 100
     tr_pad = (tr_max - tr_min) * 0.1 or 5
     tr_y_min = tr_min - tr_pad
     tr_y_max = tr_max + tr_pad
@@ -319,13 +319,13 @@ def generate_page():
     t_pad_l, t_pad_r, t_pad_t, t_pad_b = 50, 30, 20, 30
     t_plot_w = TW - t_pad_l - t_pad_r
     t_plot_h = TH - t_pad_t - t_pad_b
-    def tx(idx): return t_pad_l + (idx / (len(trend_60) - 1)) * t_plot_w
+    def tx(idx): return t_pad_l + (idx / (len(trend_1y) - 1)) * t_plot_w
     def ty(val_pct):
         rng = tr_y_max - tr_y_min if tr_y_max > tr_y_min else 1
         return t_pad_t + t_plot_h - ((val_pct - tr_y_min) / rng) * t_plot_h
-    tr_pts = " ".join(f"{tx(i):.1f},{ty(row['ratio']*100):.1f}" for i, (_, row) in enumerate(trend_60.iterrows()))
+    tr_pts = " ".join(f"{tx(i):.1f},{ty(row['ratio']*100):.1f}" for i, (_, row) in enumerate(trend_1y.iterrows()))
     tr_area_bottom = t_pad_t + t_plot_h
-    tr_area = f"{tx(0):.1f},{tr_area_bottom:.1f} {tr_pts} {tx(len(trend_60)-1):.1f},{tr_area_bottom:.1f}"
+    tr_area = f"{tx(0):.1f},{tr_area_bottom:.1f} {tr_pts} {tx(len(trend_1y)-1):.1f},{tr_area_bottom:.1f}"
     buy_line_y = ty(20); sell_line_y = ty(40)
     tr_grid_lines = ""; tr_y_labels = ""
     for i in range(5):
@@ -335,9 +335,9 @@ def generate_page():
         tr_y_labels += f'<text x="{t_pad_l - 8}" y="{yy + 4:.1f}" text-anchor="end" font-size="11" fill="#6b7a8f">{val_pct:.1f}%</text>\n'
     tr_x_labels = ""
     for i in range(7):
-        idx = int((i / 6) * (len(trend_60) - 1))
+        idx = int((i / 6) * (len(trend_1y) - 1))
         xx = tx(idx)
-        tr_x_labels += f'<text x="{xx:.1f}" y="{TH - 4}" text-anchor="middle" font-size="10" fill="#6b7a8f">{trend_60.iloc[idx]["date"].strftime("%m-%d")}</text>\n'
+        tr_x_labels += f'<text x="{xx:.1f}" y="{TH - 4}" text-anchor="middle" font-size="10" fill="#6b7a8f">{trend_1y.iloc[idx]["date"].strftime("%m-%d")}</text>\n'
 
     # 表格行
     recent_rows = ""
@@ -517,16 +517,16 @@ td:first-child {{ text-align: left; font-weight: 600; }}
     </div>
   </div>
 
-  <!-- 60日比值趋势 -->
+  <!-- 1年比值趋势 -->
   <div class="section">
-    <div class="section-title">近60日比值趋势</div>
+    <div class="section-title">近1年比值趋势</div>
     <div class="axis-chart" style="padding:10px 0;">
       <svg viewBox="0 0 {TW} {TH}" xmlns="http://www.w3.org/2000/svg">
         {tr_grid_lines}
         <line x1="{t_pad_l}" y1="{buy_line_y:.1f}" x2="{TW - t_pad_r}" y2="{buy_line_y:.1f}" stroke="#4caf50" stroke-width="1.5" stroke-dasharray="6,3"/>
-        <text x="{TW - t_pad_r + 4}" y="{buy_line_y + 4:.1f}" font-size="10" fill="#4caf50">买入 20%</text>
+        <text x="{TW - t_pad_r + 4}" y="{buy_line_y + 4:.1f}" font-size="10" fill="#4caf50">卖出红利 买入创业板 20%</text>
         <line x1="{t_pad_l}" y1="{sell_line_y:.1f}" x2="{TW - t_pad_r}" y2="{sell_line_y:.1f}" stroke="#f44336" stroke-width="1.5" stroke-dasharray="6,3"/>
-        <text x="{TW - t_pad_r + 4}" y="{sell_line_y + 4:.1f}" font-size="10" fill="#f44336">卖出 40%</text>
+        <text x="{TW - t_pad_r + 4}" y="{sell_line_y + 4:.1f}" font-size="10" fill="#f44336">买入红利 卖出创业板 40%</text>
         <polygon points="{tr_area}" fill="rgba(37, 99, 235, 0.1)"/>
         <polyline points="{tr_pts}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round"/>
         {tr_y_labels}
