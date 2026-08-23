@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: index-rotation-monitor
-    runtime: python
-    region: singapore
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
-    healthCheckPath: /health
