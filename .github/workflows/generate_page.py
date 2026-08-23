@@ -378,7 +378,7 @@ def generate_page():
     # ── 近5日数据 ──
     recent_5 = merged.tail(5).iloc[::-1]
 
-    # ── 60日趋势SVG ──
+    # ── 60日趋势SVG（与原网页一致）──
     trend_60 = merged.tail(60).reset_index(drop=True)
     tr_min = trend_60["ratio"].min() * 100
     tr_max = trend_60["ratio"].max() * 100
@@ -386,7 +386,7 @@ def generate_page():
     tr_y_min = tr_min - tr_pad
     tr_y_max = tr_max + tr_pad
 
-    TW, TH = 800, 220
+    TW, TH = 800, 240
     t_pad_l, t_pad_r, t_pad_t, t_pad_b = 50, 30, 20, 30
     t_plot_w = TW - t_pad_l - t_pad_r
     t_plot_h = TH - t_pad_t - t_pad_b
@@ -403,6 +403,22 @@ def generate_page():
 
     buy_line_y = ty(20)
     sell_line_y = ty(40)
+
+    # 5条水平网格线 & Y轴标签
+    tr_grid_lines = ""
+    tr_y_labels = ""
+    for i in range(5):
+        val_pct = tr_y_max - (i / 4) * (tr_y_max - tr_y_min)
+        yy = ty(val_pct)
+        tr_grid_lines += f'<line x1="{t_pad_l}" y1="{yy:.1f}" x2="{TW - t_pad_r}" y2="{yy:.1f}" stroke="#e2e8f0" stroke-width="1"/>\n'
+        tr_y_labels += f'<text x="{t_pad_l - 8}" y="{yy + 4:.1f}" text-anchor="end" font-size="11" fill="#6b7a8f">{val_pct:.1f}%</text>\n'
+
+    # 7个均匀X轴标签
+    tr_x_labels = ""
+    for i in range(7):
+        idx = int((i / 6) * (len(trend_60) - 1))
+        xx = tx(idx)
+        tr_x_labels += f'<text x="{xx:.1f}" y="{TH - 4}" text-anchor="middle" font-size="10" fill="#6b7a8f">{trend_60.iloc[idx]["date"].strftime("%m-%d")}</text>\n'
 
     # 近5日表格
     recent_rows = ""
@@ -512,6 +528,8 @@ td:first-child {{ text-align: left; font-weight: 600; }}
 
 .chart-wrap {{ background: var(--bg2); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px 24px; margin-bottom: 20px; overflow: hidden; }}
 .chart-wrap svg {{ width: 100%; height: auto; }}
+.axis-chart {{ margin-top: 12px; }}
+.axis-chart svg {{ width: 100%; height: auto; }}
 .legend {{ display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 12px; font-size: 13px; }}
 .legend-item {{ display: flex; align-items: center; gap: 6px; }}
 .legend-dot {{ width: 14px; height: 3px; border-radius: 2px; }}
@@ -613,18 +631,17 @@ td:first-child {{ text-align: left; font-weight: 600; }}
   <!-- 60-day Trend -->
   <div class="section">
     <div class="section-title">近60日比值趋势</div>
-    <div class="chart-wrap" style="padding:10px 0;">
+    <div class="axis-chart" style="padding:10px 0;">
       <svg viewBox="0 0 {TW} {TH}" xmlns="http://www.w3.org/2000/svg">
+        {tr_grid_lines}
         <line x1="{t_pad_l}" y1="{buy_line_y:.1f}" x2="{TW - t_pad_r}" y2="{buy_line_y:.1f}" stroke="#4caf50" stroke-width="1.5" stroke-dasharray="6,3"/>
         <text x="{TW - t_pad_r + 4}" y="{buy_line_y + 4:.1f}" font-size="10" fill="#4caf50">买入 20%</text>
         <line x1="{t_pad_l}" y1="{sell_line_y:.1f}" x2="{TW - t_pad_r}" y2="{sell_line_y:.1f}" stroke="#f44336" stroke-width="1.5" stroke-dasharray="6,3"/>
         <text x="{TW - t_pad_r + 4}" y="{sell_line_y + 4:.1f}" font-size="10" fill="#f44336">卖出 40%</text>
         <polygon points="{tr_area}" fill="rgba(37, 99, 235, 0.1)"/>
         <polyline points="{tr_pts}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round"/>
-        <text x="{t_pad_l - 8}" y="{t_pad_t + t_plot_h + 4}" text-anchor="end" font-size="11" fill="#6b7a8f">{tr_y_min:.1f}%</text>
-        <text x="{t_pad_l - 8}" y="{t_pad_t + 4}" text-anchor="end" font-size="11" fill="#6b7a8f">{tr_y_max:.1f}%</text>
-        <text x="{tx(0):.1f}" y="{TH - 4}" text-anchor="middle" font-size="10" fill="#6b7a8f">{trend_60.iloc[0]['date'].strftime('%m-%d')}</text>
-        <text x="{tx(len(trend_60)-1):.1f}" y="{TH - 4}" text-anchor="middle" font-size="10" fill="#6b7a8f">{trend_60.iloc[-1]['date'].strftime('%m-%d')}</text>
+        {tr_y_labels}
+        {tr_x_labels}
       </svg>
     </div>
   </div>
