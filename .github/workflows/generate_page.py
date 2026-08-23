@@ -375,6 +375,83 @@ def generate_page():
         xx = sx(xd)
         dd_x_labels += f'<text x="{xx:.1f}" y="{H2 - 4}" text-anchor="middle" font-size="11" fill="#6b7a8f">{yr}</text>\n'
 
+    # ── 完整历史比值图SVG ──
+    rh = nav_df.copy()
+    rh_ratio = rh['ratio'].values * 100
+    rh_min = max(0, rh_ratio.min() - 2)
+    rh_max = min(60, rh_ratio.max() + 2)
+    rh_ref = rh['date'].iloc[0]
+    rh_x_days = [(d - rh_ref).days for d in rh['date']]
+    rh_x_min, rh_x_max = rh_x_days[0], rh_x_days[-1]
+
+    # 采样（每5天）
+    rh_step = 5
+    rh_idx = list(range(0, len(rh), rh_step))
+    if rh_idx[-1] != len(rh) - 1: rh_idx.append(len(rh) - 1)
+    rh_sx = [rh_x_days[i] for i in rh_idx]
+    rh_sy = [rh_ratio[i] for i in rh_idx]
+
+    RHW, RHH = 900, 300
+    rh_pl, rh_pr, rh_pt, rh_pb = 60, 30, 30, 40
+    rh_plot_w = RHW - rh_pl - rh_pr
+    rh_plot_h = RHH - rh_pt - rh_pb
+    rh_x_rng = rh_x_max - rh_x_min if rh_x_max > rh_x_min else 1
+    rh_y_rng = rh_max - rh_min if rh_max > rh_min else 1
+
+    def rhx(x): return rh_pl + ((x - rh_x_min) / rh_x_rng) * rh_plot_w
+    def rhy(v): return rh_pt + rh_plot_h - ((v - rh_min) / rh_y_rng) * rh_plot_h
+
+    # 比值线
+    rh_line = " ".join(f"{rhx(rh_sx[i]):.1f},{rhy(rh_sy[i]):.1f}" for i in range(len(rh_idx)))
+
+    # 持有区间背景（20%-40%）
+    rh_hold_top = rhy(40)
+    rh_hold_btm = rhy(20)
+    rh_gray_area = f"{rhx(rh_x_min):.1f},{rh_hold_top:.1f} {rhx(rh_x_max):.1f},{rh_hold_top:.1f} {rhx(rh_x_max):.1f},{rh_hold_btm:.1f} {rhx(rh_x_min):.1f},{rh_hold_btm:.1f}"
+
+    # 买卖信号标记
+    rh_buy_markers = ""
+    rh_sell_markers = ""
+    for tidx, t in enumerate(trades):
+        td = (t['date'] - rh_ref).days
+        tx_pos = rhx(td)
+        ty_pos = rhy(t['ratio'] * 100)
+        is_buy = "红利低波→创业板" in t['action']
+        if is_buy:
+            # 绿色三角形（买入）
+            rh_buy_markers += f'<polygon points="{tx_pos:.1f},{ty_pos-10:.1f} {tx_pos-6:.1f},{ty_pos+4:.1f} {tx_pos+6:.1f},{ty_pos+4:.1f}" fill="#4caf50" stroke="#000" stroke-width="0.5"/>\n'
+        else:
+            # 红色倒三角形（卖出）
+            rh_sell_markers += f'<polygon points="{tx_pos:.1f},{ty_pos+10:.1f} {tx_pos-6:.1f},{ty_pos-4:.1f} {tx_pos+6:.1f},{ty_pos-4:.1f}" fill="#f44336" stroke="#000" stroke-width="0.5"/>\n'
+
+    # Y轴刻度
+    rh_y_ticks = ""
+    for i in range(5):
+        val = rh_max - (i / 4) * (rh_max - rh_min)
+        yy = rhy(val)
+        rh_y_ticks += f'<text x="{rh_pl - 8}" y="{yy + 4:.1f}" text-anchor="end" font-size="11" fill="#6b7a8f">{val:.1f}%</text>\n'
+
+    # X轴刻度（年份）
+    rh_x_labels = ""
+    rh_x_grid = ""
+    for yr in range(rh['date'].iloc[0].year, rh['date'].iloc[-1].year + 2):
+        yr_dt = datetime(yr, 1, 1)
+        if rh_ref <= yr_dt <= rh['date'].iloc[-1]:
+            xx = rhx((yr_dt - rh_ref).days)
+            rh_x_labels += f'<text x="{xx:.1f}" y="{RHH - 8}" text-anchor="middle" font-size="11" fill="#6b7a8f">{yr}</text>\n'
+            rh_x_grid += f'<line x1="{xx:.1f}" y1="{rh_pt}" x2="{xx:.1f}" y2="{RHH - rh_pb}" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="4,4"/>\n'
+
+    # 水平网格线
+    rh_grid = ""
+    for i in range(5):
+        val = rh_max - (i / 4) * (rh_max - rh_min)
+        yy = rhy(val)
+        rh_grid += f'<line x1="{rh_pl}" y1="{yy:.1f}" x2="{RHW - rh_pr}" y2="{yy:.1f}" stroke="#e2e8f0" stroke-width="1"/>\n'
+
+    # 阈值线
+    rh_buy_line_y = rhy(20)
+    rh_sell_line_y = rhy(40)
+
     # ── 近5日数据 ──
     recent_5 = merged.tail(5).iloc[::-1]
 
@@ -685,6 +762,36 @@ td:first-child {{ text-align: left; font-weight: 600; }}
       <circle cx="{latest_dd_x:.1f}" cy="{latest_dd_y:.1f}" r="4" fill="#2563eb"/>
       <text x="{latest_dd_x + 4:.1f}" y="{latest_dd_y - 4:.1f}" font-size="11" fill="#2563eb">最新 {latest_dd:.2f}%</text>
     </svg>
+  </div>
+
+  <!-- Full Historical Ratio Chart -->
+  <div class="chart-wrap">
+    <div class="section-title">创业板/红利低波 历史比值（{nav_df['date'].iloc[0].strftime('%Y')} - {nav_df['date'].iloc[-1].strftime('%Y')}）</div>
+    <div class="legend" style="margin-bottom:8px;">
+      <div class="legend-item"><span class="legend-dot" style="background:#2563eb;"></span> 创业板/红利低波 比值(%)</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#4caf50;border:1px dashed #4caf50;"></span> 买入阈值 20%</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#f44336;border:1px dashed #f44336;"></span> 卖出阈值 40%</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#e2e8f0;"></span> 持有区间</div>
+    </div>
+    <svg viewBox="0 0 {RHW} {RHH}" xmlns="http://www.w3.org/2000/svg">
+      {rh_grid}
+      {rh_x_grid}
+      <polygon points="{rh_gray_area}" fill="rgba(226, 232, 240, 0.5)"/>
+      <line x1="{rh_pl}" y1="{rh_buy_line_y:.1f}" x2="{RHW - rh_pr}" y2="{rh_buy_line_y:.1f}" stroke="#4caf50" stroke-width="1.5" stroke-dasharray="6,3"/>
+      <text x="{RHW - rh_pr + 4}" y="{rh_buy_line_y + 4:.1f}" font-size="10" fill="#4caf50">买入 20%</text>
+      <line x1="{rh_pl}" y1="{rh_sell_line_y:.1f}" x2="{RHW - rh_pr}" y2="{rh_sell_line_y:.1f}" stroke="#f44336" stroke-width="1.5" stroke-dasharray="6,3"/>
+      <text x="{RHW - rh_pr + 4}" y="{rh_sell_line_y + 4:.1f}" font-size="10" fill="#f44336">卖出 40%</text>
+      <polyline points="{rh_line}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round"/>
+      {rh_buy_markers}
+      {rh_sell_markers}
+      {rh_y_ticks}
+      {rh_x_labels}
+    </svg>
+    <div style="text-align:center;font-size:12px;color:#6b7a8f;margin-top:6px;">
+      <span style="display:inline-block;width:12px;height:12px;background:#4caf50;clip-path:polygon(50% 0%, 0% 100%, 100% 100%);margin-right:2px;"></span> 买入信号
+      &nbsp;&nbsp;
+      <span style="display:inline-block;width:12px;height:12px;background:#f44336;clip-path:polygon(0% 0%, 100% 0%, 50% 100%);margin-right:2px;"></span> 卖出信号
+    </div>
   </div>
 
   <!-- Strategy Rules -->
