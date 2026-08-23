@@ -723,6 +723,36 @@ td:first-child {{ text-align: left; font-weight: 600; }}
     </div>
   </div>
 
+  <!-- Full Historical Ratio Chart -->
+  <div class="chart-wrap">
+    <div class="section-title">创业板/红利低波 历史比值（{nav_df['date'].iloc[0].strftime('%Y')} - {nav_df['date'].iloc[-1].strftime('%Y')}）</div>
+    <div class="legend" style="margin-bottom:8px;">
+      <div class="legend-item"><span class="legend-dot" style="background:#2563eb;"></span> 创业板/红利低波 比值(%)</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#4caf50;border:1px dashed #4caf50;"></span> 买入阈值 20%</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#f44336;border:1px dashed #f44336;"></span> 卖出阈值 40%</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#e2e8f0;"></span> 持有区间</div>
+    </div>
+    <svg viewBox="0 0 {RHW} {RHH}" xmlns="http://www.w3.org/2000/svg">
+      {rh_grid}
+      {rh_x_grid}
+      <polygon points="{rh_gray_area}" fill="rgba(226, 232, 240, 0.5)"/>
+      <line x1="{rh_pl}" y1="{rh_buy_line_y:.1f}" x2="{RHW - rh_pr}" y2="{rh_buy_line_y:.1f}" stroke="#4caf50" stroke-width="1.5" stroke-dasharray="6,3"/>
+      <text x="{RHW - rh_pr + 4}" y="{rh_buy_line_y + 4:.1f}" font-size="10" fill="#4caf50">买入 20%</text>
+      <line x1="{rh_pl}" y1="{rh_sell_line_y:.1f}" x2="{RHW - rh_pr}" y2="{rh_sell_line_y:.1f}" stroke="#f44336" stroke-width="1.5" stroke-dasharray="6,3"/>
+      <text x="{RHW - rh_pr + 4}" y="{rh_sell_line_y + 4:.1f}" font-size="10" fill="#f44336">卖出 40%</text>
+      <polyline points="{rh_line}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round"/>
+      {rh_buy_markers}
+      {rh_sell_markers}
+      {rh_y_ticks}
+      {rh_x_labels}
+    </svg>
+    <div style="text-align:center;font-size:12px;color:#6b7a8f;margin-top:6px;">
+      <span style="display:inline-block;width:12px;height:12px;background:#4caf50;clip-path:polygon(50% 0%, 0% 100%, 100% 100%);margin-right:2px;"></span> 买入信号
+      &nbsp;&nbsp;
+      <span style="display:inline-block;width:12px;height:12px;background:#f44336;clip-path:polygon(0% 0%, 100% 0%, 50% 100%);margin-right:2px;"></span> 卖出信号
+    </div>
+  </div>
+
   <!-- Equity Curve Chart -->
   <div class="chart-wrap">
     <div class="section-title">回测收益曲线（{nav_df['date'].iloc[0].strftime('%Y')} - {nav_df['date'].iloc[-1].strftime('%Y')}）</div>
@@ -762,36 +792,6 @@ td:first-child {{ text-align: left; font-weight: 600; }}
       <circle cx="{latest_dd_x:.1f}" cy="{latest_dd_y:.1f}" r="4" fill="#2563eb"/>
       <text x="{latest_dd_x + 4:.1f}" y="{latest_dd_y - 4:.1f}" font-size="11" fill="#2563eb">最新 {latest_dd:.2f}%</text>
     </svg>
-  </div>
-
-  <!-- Full Historical Ratio Chart -->
-  <div class="chart-wrap">
-    <div class="section-title">创业板/红利低波 历史比值（{nav_df['date'].iloc[0].strftime('%Y')} - {nav_df['date'].iloc[-1].strftime('%Y')}）</div>
-    <div class="legend" style="margin-bottom:8px;">
-      <div class="legend-item"><span class="legend-dot" style="background:#2563eb;"></span> 创业板/红利低波 比值(%)</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#4caf50;border:1px dashed #4caf50;"></span> 买入阈值 20%</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#f44336;border:1px dashed #f44336;"></span> 卖出阈值 40%</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#e2e8f0;"></span> 持有区间</div>
-    </div>
-    <svg viewBox="0 0 {RHW} {RHH}" xmlns="http://www.w3.org/2000/svg">
-      {rh_grid}
-      {rh_x_grid}
-      <polygon points="{rh_gray_area}" fill="rgba(226, 232, 240, 0.5)"/>
-      <line x1="{rh_pl}" y1="{rh_buy_line_y:.1f}" x2="{RHW - rh_pr}" y2="{rh_buy_line_y:.1f}" stroke="#4caf50" stroke-width="1.5" stroke-dasharray="6,3"/>
-      <text x="{RHW - rh_pr + 4}" y="{rh_buy_line_y + 4:.1f}" font-size="10" fill="#4caf50">买入 20%</text>
-      <line x1="{rh_pl}" y1="{rh_sell_line_y:.1f}" x2="{RHW - rh_pr}" y2="{rh_sell_line_y:.1f}" stroke="#f44336" stroke-width="1.5" stroke-dasharray="6,3"/>
-      <text x="{RHW - rh_pr + 4}" y="{rh_sell_line_y + 4:.1f}" font-size="10" fill="#f44336">卖出 40%</text>
-      <polyline points="{rh_line}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round"/>
-      {rh_buy_markers}
-      {rh_sell_markers}
-      {rh_y_ticks}
-      {rh_x_labels}
-    </svg>
-    <div style="text-align:center;font-size:12px;color:#6b7a8f;margin-top:6px;">
-      <span style="display:inline-block;width:12px;height:12px;background:#4caf50;clip-path:polygon(50% 0%, 0% 100%, 100% 100%);margin-right:2px;"></span> 买入信号
-      &nbsp;&nbsp;
-      <span style="display:inline-block;width:12px;height:12px;background:#f44336;clip-path:polygon(0% 0%, 100% 0%, 50% 100%);margin-right:2px;"></span> 卖出信号
-    </div>
   </div>
 
   <!-- Strategy Rules -->
