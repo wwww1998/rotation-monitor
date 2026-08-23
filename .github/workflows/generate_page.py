@@ -16,9 +16,9 @@ from matplotlib.ticker import FuncFormatter
 CYB_CODE = "399006"
 HLDB_CODE = "H30269"
 
-# ─── 策略参数（历史分位数）────────────────────────────────────────
-BUY_PCTILE = 0.20      # 比值低于历史20%分位数 → 买入创业板
-SELL_PCTILE = 0.80     # 比值高于历史80%分位数 → 卖出创业板（买入红利低波）
+# ─── 策略参数（固定阈值）────────────────────────────────────────
+BUY_THRESHOLD = 0.20     # 比值 < 20% → 买入创业板
+SELL_THRESHOLD = 0.40    # 比值 > 40% → 卖出创业板（买入红利低波）
 INITIAL_CAPITAL = 1_000_000
 BACKTEST_START = "2016-08-03"
 
@@ -53,16 +53,8 @@ def pct_str(val):
 
 # ─── 回测引擎 ───────────────────────────────────────────────────
 def run_backtest(data):
-    # 先用全量数据（2010年起）计算分位数，确保回测起始日有足够历史
-    # 注意：expanding(）包含当前值，不产生超前偏差
-    data['ratio_pctile'] = data['ratio'].expanding().rank(pct=True)
-
     bd = data[(data['date'] >= BACKTEST_START)].copy().reset_index(drop=True)
-    if len(bd) < 20: return None, None, None
-
-    # 全历史分位数阈值（用于图表显示）
-    pctile_20_val = data['ratio'].quantile(0.20)
-    pctile_80_val = data['ratio'].quantile(0.80)
+    if len(bd) < 20: return None, None
 
     position = 'hldb'
     shares_cyb = 0.0
@@ -73,22 +65,21 @@ def run_backtest(data):
     nav_daily = []
     for _, row in bd.iterrows():
         cp, hp, ratio = row['close_cyb'], row['close_hldb'], row['ratio']
-        pctile = row['ratio_pctile']
         mkt = shares_cyb * cp + shares_hldb * hp
         cyb_val = INITIAL_CAPITAL / cyb_start * cp
         hldb_val = INITIAL_CAPITAL / hldb_start * hp
-        if position == 'hldb' and pctile < BUY_PCTILE:
+        if position == 'hldb' and ratio < BUY_THRESHOLD:
             shares_cyb = mkt / cp; shares_hldb = 0.0; position = 'cyb'
-        elif position == 'cyb' and pctile > SELL_PCTILE:
+        elif position == 'cyb' and ratio > SELL_THRESHOLD:
             shares_hldb = mkt / hp; shares_cyb = 0.0; position = 'hldb'
         nav_daily.append({'date': row['date'], 'nav': mkt, 'cyb_hold': cyb_val, 'hldb_hold': hldb_val,
-                          'ratio': ratio, 'ratio_pctile': pctile, 'position': position})
+                          'ratio': ratio, 'position': position})
 
     nav_df = pd.DataFrame(nav_daily)
     peak = np.maximum.accumulate(nav_df['nav'].values)
     nav_df['drawdown'] = (nav_df['nav'].values - peak) / peak * 100
     max_dd = nav_df['drawdown'].min()
-    return nav_df, max_dd, (pctile_20_val, pctile_80_val)
+    return nav_df, max_dd
 
 # ─── matplotlib 三面板图 ─────────────────────────────────────────
 def setup_chinese_font():
@@ -119,11 +110,9 @@ def setup_chinese_font():
     print("未找到中文字体，使用DejaVu Sans（中文可能显示为方框）")
     return False
 
-def generate_chart(nav_df, trades, max_dd, pctile_thresholds):
+def generate_chart(nav_df, trades, max_dd):
     """生成三面板图表并返回base64编码的SVG"""
     has_cn = setup_chinese_font()
-    pctile_20_val = pctile_thresholds[0] * 100
-    pctile_80_val = pctile_thresholds[1] * 100
 
     # 回测数据
     dates = nav_df['date'].values
@@ -170,18 +159,15 @@ def generate_chart(nav_df, trades, max_dd, pctile_thresholds):
                  arrowprops=dict(arrowstyle='->', color='#dc2626', lw=1.5))
 
     ax1.set_ylabel('资产（百万元）', fontsize=11)
-    ax1.set_title('轮动策略 vs 持有策略 收益对比（历史分位数阈值）', fontsize=13, fontweight='bold', pad=10)
+    ax1.set_title('轮动策略 vs 持有策略 收益对比（初始资产 100万元）', fontsize=13, fontweight='bold', pad=10)
     ax1.legend(loc='upper left', fontsize=10, framealpha=0.9)
     ax1.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f'{x:.1f}'))
     ax1.set_ylim(0, max(nav / 1e6) * 1.2)
 
-    # ── Panel 2: 比值图（分位数阈值） ──
-    ax2.fill_between(dates, pctile_20_val, pctile_80_val, alpha=0.15, color='#9ca3af',
-                     label=f'持有区间（{pctile_20_val:.1f}%-{pctile_80_val:.1f}%）' if has_cn else 'Hold Zone')
-    ax2.axhline(y=pctile_20_val, color='#4caf50', linewidth=1.5, linestyle='--',
-                label=f'买入阈值（20%分位 {pctile_20_val:.1f}%）' if has_cn else f'Buy {pctile_20_val:.1f}%')
-    ax2.axhline(y=pctile_80_val, color='#f44336', linewidth=1.5, linestyle='--',
-                label=f'卖出阈值（80%分位 {pctile_80_val:.1f}%）' if has_cn else f'Sell {pctile_80_val:.1f}%')
+    # ── Panel 2: 比值图 ──
+    ax2.fill_between(dates, 20, 40, alpha=0.15, color='#9ca3af', label='持有区间' if has_cn else 'Hold Zone')
+    ax2.axhline(y=20, color='#4caf50', linewidth=1.5, linestyle='--', label='买入阈值（20%）' if has_cn else 'Buy 20%')
+    ax2.axhline(y=40, color='#f44336', linewidth=1.5, linestyle='--', label='卖出阈值（40%）' if has_cn else 'Sell 40%')
     ax2.plot(dates, ratios, color='#2563eb', linewidth=2, label='创业板/红利低波 比值(%)')
 
     for t in trades:
@@ -193,9 +179,7 @@ def generate_chart(nav_df, trades, max_dd, pctile_thresholds):
         ax2.scatter(td, tr, c=color, s=120, marker=marker, edgecolors='black', linewidth=0.5, zorder=10)
 
     ax2.set_ylabel('比值（%）', fontsize=11)
-    ratio_min = max(ratios.min() - 5, 0)
-    ratio_max = ratios.max() + 5
-    ax2.set_ylim(ratio_min, ratio_max)
+    ax2.set_ylim(10, 50)
     ax2.legend(loc='upper left', fontsize=9, framealpha=0.9, ncol=2)
 
     # ── Panel 3: 回撤曲线 ──
@@ -268,25 +252,21 @@ def generate_page():
     hldb_chg = latest["hldb_pct"]
     ratio_median = merged["ratio"].median()
 
-    # 计算当前比值的全历史分位数
-    current_pctile = (merged['ratio'] < ratio).mean() * 100
-    pctile_20_val = merged['ratio'].quantile(0.20) * 100
-    pctile_80_val = merged['ratio'].quantile(0.80) * 100
-
-    # 信号（基于分位数）
-    if current_pctile < 20:
+    # 信号（基于固定阈值）
+    ratio_pct = ratio * 100
+    if ratio_pct < 20:
         signal, hold, signal_class, reason = "买入创业板", "创业板指 (399006)", "buy-cyb", \
-            f"当前比值处于历史 {current_pctile:.0f}% 分位（< 20%分位），创业板相对低估，建议买入创业板。"
-    elif current_pctile > 80:
+            f"比值 {ratio_pct:.2f}% < 20%，创业板相对低估，建议买入创业板。"
+    elif ratio_pct > 40:
         signal, hold, signal_class, reason = "买入红利低波", "红利低波 (H30269)", "buy-hldb", \
-            f"当前比值处于历史 {current_pctile:.0f}% 分位（> 80%分位），创业板相对高估，建议切换至红利低波。"
+            f"比值 {ratio_pct:.2f}% > 40%，创业板相对高估，建议切换至红利低波。"
     else:
-        if current_pctile < 50:
+        if ratio_pct < 30:
             signal, hold, signal_class, reason = "建议持有创业板", "创业板指 (399006)", "hold-cyb", \
-                f"当前比值处于历史 {current_pctile:.0f}% 分位（20%-80%持有区间），偏创业板方向。"
+                f"比值 {ratio_pct:.2f}%，处于20%-40%观望区间，偏创业板方向。"
         else:
             signal, hold, signal_class, reason = "建议持有红利低波", "红利低波 (H30269)", "hold-hldb", \
-                f"当前比值处于历史 {current_pctile:.0f}% 分位（20%-80%持有区间），偏红利低波方向。"
+                f"比值 {ratio_pct:.2f}%，处于20%-40%观望区间，偏红利低波方向。"
 
     signal_colors = {
         "buy-cyb": {"bg": "linear-gradient(135deg, #e3f2fd, #fff)", "border": "#2196f3", "text": "#1565c0"},
@@ -297,8 +277,8 @@ def generate_page():
     sc = signal_colors.get(signal_class, signal_colors["hold-hldb"])
 
     # 运行回测
-    print("运行回测（基于历史分位数）...")
-    nav_df, max_dd, pctile_thresholds = run_backtest(merged)
+    print("运行回测...")
+    nav_df, max_dd = run_backtest(merged)
     if nav_df is None: print("ERROR: 回测失败"); return
 
     final_value = nav_df['nav'].iloc[-1]
@@ -314,17 +294,16 @@ def generate_page():
     pos = 'hldb'
     for _, row in nav_df.iterrows():
         r = row['ratio']
-        pct = row['ratio_pctile']
-        if pos == 'hldb' and pct < BUY_PCTILE:
-            trades.append({'date': row['date'], 'action': '红利低波→创业板', 'ratio': r, 'pctile': pct, 'nav': row['nav']})
+        if pos == 'hldb' and r < BUY_THRESHOLD:
+            trades.append({'date': row['date'], 'action': '红利低波→创业板', 'ratio': r, 'nav': row['nav']})
             pos = 'cyb'
-        elif pos == 'cyb' and pct > SELL_PCTILE:
-            trades.append({'date': row['date'], 'action': '创业板→红利低波', 'ratio': r, 'pctile': pct, 'nav': row['nav']})
+        elif pos == 'cyb' and r > SELL_THRESHOLD:
+            trades.append({'date': row['date'], 'action': '创业板→红利低波', 'ratio': r, 'nav': row['nav']})
             pos = 'hldb'
 
     # 生成matplotlib三面板图
     print("生成图表...")
-    chart_svg = generate_chart(nav_df, trades, max_dd, pctile_thresholds)
+    chart_svg = generate_chart(nav_df, trades, max_dd)
 
     # 近5日数据
     recent_5 = merged.tail(5).iloc[::-1]
@@ -347,7 +326,7 @@ def generate_page():
     tr_pts = " ".join(f"{tx(i):.1f},{ty(row['ratio']*100):.1f}" for i, (_, row) in enumerate(trend_60.iterrows()))
     tr_area_bottom = t_pad_t + t_plot_h
     tr_area = f"{tx(0):.1f},{tr_area_bottom:.1f} {tr_pts} {tx(len(trend_60)-1):.1f},{tr_area_bottom:.1f}"
-    buy_line_y = ty(pctile_20_val); sell_line_y = ty(pctile_80_val)
+    buy_line_y = ty(20); sell_line_y = ty(40)
     tr_grid_lines = ""; tr_y_labels = ""
     for i in range(5):
         val_pct = tr_y_max - (i / 4) * (tr_y_max - tr_y_min)
@@ -369,16 +348,12 @@ def generate_page():
 
     trade_rows = ""
     for t in trades:
-        trade_rows += f"""          <tr><td>{t['date'].strftime('%Y-%m-%d')}</td><td>{t['action']}</td><td>{t['pctile']*100:.0f}%</td><td>{t['ratio']*100:.2f}%</td><td>{fmt_num(t['nav'])}</td></tr>\n"""
+        trade_rows += f"""          <tr><td>{t['date'].strftime('%Y-%m-%d')}</td><td>{t['action']}</td><td>{t['ratio']*100:.2f}%</td><td>{fmt_num(t['nav'])}</td></tr>\n"""
 
     # ── 生成HTML ──
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     ratio_pct = ratio * 100; ratio_median_pct = ratio_median * 100
-    # 比值位置：基于分位数区间，而不是固定0-60
-    ratio_bar_min = max(0, pctile_20_val - 5)
-    ratio_bar_max = pctile_80_val + 5
-    ratio_bar_range = ratio_bar_max - ratio_bar_min if ratio_bar_max > ratio_bar_min else 1
-    ratio_pos = min(98, max(2, ((ratio_pct - ratio_bar_min) / ratio_bar_range) * 100))
+    ratio_pos = min(98, max(2, ((ratio_pct - 0) / (60 - 0)) * 100))
     cyb_chg_str, cyb_chg_cls = pct_str(cyb_chg); hldb_chg_str, hldb_chg_cls = pct_str(hldb_chg)
 
     html = f"""<!DOCTYPE html>
@@ -500,7 +475,7 @@ td:first-child {{ text-align: left; font-weight: 600; }}
     <div class="stat-card">
       <div class="stat-label">当前比值</div>
       <div class="stat-value" style="color:{sc['text']}">{ratio_pct:.2f}%</div>
-      <div class="stat-change neutral">历史 {current_pctile:.0f}% 分位</div>
+      <div class="stat-change neutral">中位数 {ratio_median_pct:.2f}%</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">建议持仓</div>
@@ -517,12 +492,12 @@ td:first-child {{ text-align: left; font-weight: 600; }}
       <div class="ratio-marker" style="left: {ratio_pos:.2f}%;"></div>
     </div>
     <div class="ratio-thresholds">
-      <span class="buy">买入 {pctile_20_val:.1f}% ▼ 20%分位</span>
-      <span class="sell">80%分位 ▲ {pctile_80_val:.1f}% 卖出</span>
+      <span class="buy">0% ▼ 买入阈值 20%</span>
+      <span class="sell">卖出阈值 40% ▲ 60%+</span>
     </div>
     <div class="ratio-labels">
       <span>买入创业板</span>
-      <span>持有区间（{pctile_20_val:.1f}%-{pctile_80_val:.1f}%）</span>
+      <span>持有区间</span>
       <span>买入红利低波</span>
     </div>
   </div>
@@ -549,9 +524,9 @@ td:first-child {{ text-align: left; font-weight: 600; }}
       <svg viewBox="0 0 {TW} {TH}" xmlns="http://www.w3.org/2000/svg">
         {tr_grid_lines}
         <line x1="{t_pad_l}" y1="{buy_line_y:.1f}" x2="{TW - t_pad_r}" y2="{buy_line_y:.1f}" stroke="#4caf50" stroke-width="1.5" stroke-dasharray="6,3"/>
-        <text x="{TW - t_pad_r + 4}" y="{buy_line_y + 4:.1f}" font-size="10" fill="#4caf50">买入 {pctile_20_val:.1f}%</text>
+        <text x="{TW - t_pad_r + 4}" y="{buy_line_y + 4:.1f}" font-size="10" fill="#4caf50">买入 20%</text>
         <line x1="{t_pad_l}" y1="{sell_line_y:.1f}" x2="{TW - t_pad_r}" y2="{sell_line_y:.1f}" stroke="#f44336" stroke-width="1.5" stroke-dasharray="6,3"/>
-        <text x="{TW - t_pad_r + 4}" y="{sell_line_y + 4:.1f}" font-size="10" fill="#f44336">卖出 {pctile_80_val:.1f}%</text>
+        <text x="{TW - t_pad_r + 4}" y="{sell_line_y + 4:.1f}" font-size="10" fill="#f44336">卖出 40%</text>
         <polygon points="{tr_area}" fill="rgba(37, 99, 235, 0.1)"/>
         <polyline points="{tr_pts}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round"/>
         {tr_y_labels}
@@ -568,19 +543,19 @@ td:first-child {{ text-align: left; font-weight: 600; }}
 
   <!-- 策略规则 -->
   <div class="section">
-    <div class="section-title">策略规则（基于历史分位数）</div>
+    <div class="section-title">策略规则</div>
     <div class="rules-grid">
       <div class="rule-card buy">
         <div class="rule-title">买入创业板</div>
-        <div class="rule-desc">当比值处于历史 20% 分位数以下（当前 {pctile_20_val:.1f}%）时，全仓切换至创业板指</div>
+        <div class="rule-desc">当创业板/红利低波比值 &lt; 20% 时，全仓切换至创业板指</div>
       </div>
       <div class="rule-card sell">
         <div class="rule-title">买入红利低波</div>
-        <div class="rule-desc">当比值处于历史 80% 分位数以上（当前 {pctile_80_val:.1f}%）时，全仓切换至红利低波</div>
+        <div class="rule-desc">当创业板/红利低波比值 &gt; 40% 时，全仓切换至红利低波</div>
       </div>
       <div class="rule-card hold">
         <div class="rule-title">持有观望</div>
-        <div class="rule-desc">比值在 20%-80% 分位数之间时，维持现有持仓不变</div>
+        <div class="rule-desc">比值在 20%-40% 之间时，维持现有持仓不变</div>
       </div>
       <div class="rule-card" style="border-left: 4px solid #9c27b0;">
         <div class="rule-title">初始持仓</div>
@@ -604,7 +579,7 @@ td:first-child {{ text-align: left; font-weight: 600; }}
     </div>
     <div class="table-wrap" style="margin-top:12px;">
       <table>
-        <thead><tr><th>日期</th><th>操作</th><th>分位</th><th>比值</th><th>市值</th></tr></thead>
+        <thead><tr><th>日期</th><th>操作</th><th>比值</th><th>市值</th></tr></thead>
         <tbody>
 {trade_rows}
         </tbody>
@@ -615,7 +590,7 @@ td:first-child {{ text-align: left; font-weight: 600; }}
   <!-- Footer -->
   <div class="footer">
     <p>数据来源：AKShare（新浪财经 / 中证指数官网）</p>
-    <p>策略逻辑：创业板与红利低波指数轮动，基于历史分位数（20%/80%分位）阈值判断</p>
+    <p>策略逻辑：创业板与红利低波指数轮动，基于比值阈值判断</p>
     <p>⚠️ 本页面数据仅供参考，不构成投资建议</p>
     <p style="margin-top:4px;"><a href="javascript:location.reload()">刷新页面</a> 获取最新数据</p>
   </div>
