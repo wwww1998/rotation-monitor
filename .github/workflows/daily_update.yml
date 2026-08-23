@@ -27,7 +27,9 @@ jobs:
           python-version: "3.10"
 
       - name: 安装依赖
-        run: pip install akshare pandas numpy
+        run: |
+          sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+          pip install akshare pandas numpy matplotlib
 
       - name: 生成监控页面
         run: python .github/workflows/generate_page.py
