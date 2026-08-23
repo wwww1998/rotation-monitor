@@ -82,27 +82,31 @@ def run_backtest(data):
 
 # ─── matplotlib 三面板图 ─────────────────────────────────────────
 def setup_chinese_font():
-    """尝试设置中文字体，失败则使用默认字体"""
+    """设置中文字体，确保matplotlib正确渲染中文"""
+    plt.rcParams['axes.unicode_minus'] = False
     try:
         import matplotlib.font_manager as fm
-        # 尝试常见中文字体
-        candidates = ['WenQuanYi Micro Hei', 'Noto Sans CJK SC', 'Noto Sans CJK JP',
-                      'SimHei', 'Microsoft YaHei', 'DejaVu Sans']
-        for font in candidates:
-            try:
-                plt.rcParams['font.sans-serif'] = [font, 'DejaVu Sans']
-                plt.rcParams['axes.unicode_minus'] = False
-                fig_test, ax_test = plt.subplots(figsize=(1, 1))
-                ax_test.set_title('测试')
-                fig_test.canvas.draw()
-                plt.close(fig_test)
+        # 刷新字体缓存
+        fm._load_fontmanager(try_read_cache=False)
+        # 查找系统中所有可用字体
+        available = sorted(set([f.name for f in fm.fontManager.ttflist]))
+        candidates = ['Noto Sans CJK SC', 'Noto Sans CJK JP', 'WenQuanYi Micro Hei',
+                      'Noto Sans SC', 'Noto Sans', 'SimHei', 'Microsoft YaHei']
+        for c in candidates:
+            if c in available:
+                plt.rcParams['font.sans-serif'] = [c, 'DejaVu Sans']
+                print(f"使用字体: {c}")
                 return True
-            except:
-                continue
-    except:
-        pass
+        # 任何支持中文的字体
+        cn_fonts = [f for f in available if any(k in f.lower() for k in ['cjk', 'noto', 'hei', 'song', 'ming', 'fang', 'kai', 'chinese', 'wenquanyi'])]
+        if cn_fonts:
+            plt.rcParams['font.sans-serif'] = [cn_fonts[0], 'DejaVu Sans']
+            print(f"使用字体: {cn_fonts[0]}")
+            return True
+    except Exception as e:
+        print(f"字体检测异常: {e}")
     plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
-    plt.rcParams['axes.unicode_minus'] = False
+    print("未找到中文字体，使用DejaVu Sans（中文可能显示为方框）")
     return False
 
 def generate_chart(nav_df, trades, max_dd):
