@@ -565,31 +565,7 @@ td:first-child {{ text-align: left; font-weight: 600; }}
     </div>
   </div>
 
-  <!-- 2025年全年比值趋势 -->
-	  <div class="section">
-	    <div class="section-title">2025年全年比值趋势</div>
-	    <div class="stats-grid" style="margin-bottom:12px;">
-	      <div class="stat-card"><div class="stat-label">2025年比值范围</div><div class="stat-value" style="font-size:18px;">{y25_min:.2f}% ~ {y25_max:.2f}%</div></div>
-	      <div class="stat-card"><div class="stat-label">平均比值</div><div class="stat-value" style="font-size:18px;">{y25_ratio_avg:.2f}%</div></div>
-	      <div class="stat-card"><div class="stat-label">中位数比值</div><div class="stat-value" style="font-size:18px;">{y25_ratio_mid:.2f}%</div></div>
-	      <div class="stat-card"><div class="stat-label">交易天数</div><div class="stat-value" style="font-size:18px;">{len(d2025)}</div></div>
-	    </div>
-	    <div class="axis-chart" style="padding:10px 0;">
-	      <svg viewBox="0 0 {TW25} {TH25}" xmlns="http://www.w3.org/2000/svg">
-	        {y25_grid}
-	        <line x1="{t_pad_l}" y1="{y25_buy_line_y:.1f}" x2="{TW25 - t_pad_r}" y2="{y25_buy_line_y:.1f}" stroke="#4caf50" stroke-width="1.5" stroke-dasharray="6,3"/>
-        <text x="{TW25 - t_pad_r - 3}" y="{y25_buy_line_y + 4:.1f}" text-anchor="end" font-size="10" fill="#4caf50">卖出红利 买入创业板 20%</text>
-        <line x1="{t_pad_l}" y1="{y25_sell_line_y:.1f}" x2="{TW25 - t_pad_r}" y2="{y25_sell_line_y:.1f}" stroke="#f44336" stroke-width="1.5" stroke-dasharray="6,3"/>
-        <text x="{TW25 - t_pad_r - 3}" y="{y25_sell_line_y + 4:.1f}" text-anchor="end" font-size="10" fill="#f44336">买入红利 卖出创业板 40%</text>
-	        <polygon points="{y25_area}" fill="rgba(37, 99, 235, 0.1)"/>
-	        <polyline points="{y25_pts}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round"/>
-	        {y25_ylabels}
-	        {y25_xlabels}
-	      </svg>
-	    </div>
-	  </div>
-
-	  <!-- 三面板回测图 -->
+  <!-- 三面板回测图 -->
   <div class="chart-wrap">
     <div class="section-title">轮动策略 vs 持有策略 收益对比（初始资产 100万元）</div>
     {chart_svg}
