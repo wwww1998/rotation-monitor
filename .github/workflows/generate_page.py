@@ -324,6 +324,13 @@ def generate_page():
         rng = tr_y_max - tr_y_min if tr_y_max > tr_y_min else 1
         return t_pad_t + t_plot_h - ((val_pct - tr_y_min) / rng) * t_plot_h
     tr_pts = " ".join(f"{tx(i):.1f},{ty(row['ratio']*100):.1f}" for i, (_, row) in enumerate(trend_1y.iterrows()))
+    # 悬停点
+    tr_hover = ""
+    for i, (_, row) in enumerate(trend_1y.iterrows()):
+        cx, cy = tx(i), ty(row['ratio']*100)
+        d = row['date'].strftime('%Y-%m-%d')
+        r = row['ratio'] * 100
+        tr_hover += f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="8" fill="transparent" class="tr-hover-pt" data-date="{d}" data-ratio="{r:.2f}"/>\n'
     tr_area_bottom = t_pad_t + t_plot_h
     tr_area = f"{tx(0):.1f},{tr_area_bottom:.1f} {tr_pts} {tx(len(trend_1y)-1):.1f},{tr_area_bottom:.1f}"
     buy_line_y = ty(20); sell_line_y = ty(40)
@@ -461,8 +468,10 @@ td:first-child {{ text-align: left; font-weight: 600; }}
 .chart-wrap {{ background: var(--bg2); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px 24px; margin-bottom: 20px; overflow: hidden; }}
 .chart-wrap svg {{ width: 100%; height: auto; }}
 .chart-wrap img {{ width: 100%; height: auto; border-radius: 8px; }}
-.axis-chart {{ margin-top: 12px; }}
+.axis-chart {{ margin-top: 12px; position: relative; }}
 .axis-chart svg {{ width: 100%; height: auto; }}
+.tr-hover-pt {{ cursor: pointer; }}
+.tr-hover-pt:hover ~ #trHoverLine, .tr-hover-pt:hover ~ #trHoverDot {{ opacity: 1; }}
 .footer {{ text-align: center; padding: 20px; color: var(--muted); font-size: 12px; line-height: 1.8; }}
 .footer a {{ color: var(--accent); text-decoration: none; }}
 @media (max-width: 640px) {{
@@ -552,7 +561,7 @@ td:first-child {{ text-align: left; font-weight: 600; }}
   <div class="section">
     <div class="section-title">近1年比值趋势</div>
     <div class="axis-chart" style="padding:10px 0;">
-      <svg viewBox="0 0 {TW} {TH}" xmlns="http://www.w3.org/2000/svg">
+      <svg viewBox="0 0 {TW} {TH}" xmlns="http://www.w3.org/2000/svg" class="trend-svg" id="trendSvg">
         {tr_grid_lines}
         <line x1="{t_pad_l}" y1="{buy_line_y:.1f}" x2="{TW - t_pad_r}" y2="{buy_line_y:.1f}" stroke="#4caf50" stroke-width="1.5" stroke-dasharray="6,3"/>
         <text x="{TW - t_pad_r + 15}" y="{buy_line_y + 10:.1f}" text-anchor="end" font-size="10" fill="#4caf50">卖出红利 买入创业板 20%</text>
@@ -560,9 +569,13 @@ td:first-child {{ text-align: left; font-weight: 600; }}
         <text x="{TW - t_pad_r + 15}" y="{sell_line_y - 2:.1f}" text-anchor="end" font-size="10" fill="#f44336">买入红利 卖出创业板 40%</text>
         <polygon points="{tr_area}" fill="rgba(37, 99, 235, 0.1)"/>
         <polyline points="{tr_pts}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round"/>
+        <line id="trHoverLine" x1="0" y1="{t_pad_t}" x2="0" y2="{tr_area_bottom}" stroke="#1a2332" stroke-width="1" opacity="0"/>
+        <circle id="trHoverDot" cx="0" cy="0" r="5" fill="#2563eb" stroke="white" stroke-width="2" opacity="0"/>
+        {tr_hover}
         {tr_y_labels}
         {tr_x_labels}
       </svg>
+      <div id="trTooltip" style="position:absolute;display:none;pointer-events:none;background:#1a2332;color:white;padding:6px 10px;border-radius:6px;font-size:12px;z-index:10;white-space:nowrap;"></div>
     </div>
   </div>
 
@@ -617,6 +630,74 @@ td:first-child {{ text-align: left; font-weight: 600; }}
       </table>
     </div>
   </div>
+
+  <!-- 悬停交互脚本 -->
+  <script>
+  (function() {{
+    var svg = document.getElementById('trendSvg');
+    var tooltip = document.getElementById('trTooltip');
+    var hLine = document.getElementById('trHoverLine');
+    var hDot = document.getElementById('trHoverDot');
+    var pts = document.querySelectorAll('.tr-hover-pt');
+    if (!svg || !tooltip) return;
+    var svgRect;
+    function updateRect() {{ svgRect = svg.getBoundingClientRect(); }}
+    pts.forEach(function(pt) {{
+      pt.addEventListener('mouseenter', function(e) {{
+        updateRect();
+        var cx = parseFloat(pt.getAttribute('cx'));
+        var cy = parseFloat(pt.getAttribute('cy'));
+        var date = pt.getAttribute('data-date');
+        var ratio = pt.getAttribute('data-ratio');
+        // 显示竖线和圆点
+        hLine.setAttribute('x1', cx);
+        hLine.setAttribute('x2', cx);
+        hDot.setAttribute('cx', cx);
+        hDot.setAttribute('cy', cy);
+        hLine.setAttribute('opacity', '0.4');
+        hDot.setAttribute('opacity', '1');
+        // 计算tooltip位置
+        var scale = svgRect.width / {TW};
+        var px = cx * scale + svgRect.left;
+        var py = cy * scale + svgRect.top;
+        tooltip.innerHTML = date + ' | 比值 ' + ratio + '%';
+        tooltip.style.display = 'block';
+        var ttRect = tooltip.getBoundingClientRect();
+        var left = px + 12;
+        if (left + ttRect.width > window.innerWidth - 10) left = px - ttRect.width - 12;
+        tooltip.style.left = left + 'px';
+        tooltip.style.top = (py - 30) + 'px';
+      }});
+      pt.addEventListener('mouseleave', function() {{
+        hLine.setAttribute('opacity', '0');
+        hDot.setAttribute('opacity', '0');
+        tooltip.style.display = 'none';
+      }});
+    }});
+    // 移动端touch支持
+    svg.addEventListener('touchmove', function(e) {{
+      e.preventDefault();
+      updateRect();
+      var touch = e.touches[0];
+      var x = (touch.clientX - svgRect.left) / svgRect.width * {TW};
+      var closest = null, minDist = 999;
+      pts.forEach(function(pt) {{
+        var pcx = parseFloat(pt.getAttribute('cx'));
+        var d = Math.abs(pcx - x);
+        if (d < minDist) {{ minDist = d; closest = pt; }}
+      }});
+      if (closest && minDist < 15) {{
+        var ev = new Event('mouseenter');
+        closest.dispatchEvent(ev);
+      }}
+    }});
+    svg.addEventListener('touchend', function() {{
+      hLine.setAttribute('opacity', '0');
+      hDot.setAttribute('opacity', '0');
+      tooltip.style.display = 'none';
+    }});
+  }})();
+  </script>
 
   <!-- Footer -->
   <div class="footer">
