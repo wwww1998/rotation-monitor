@@ -2,7 +2,11 @@ name: 每日更新监控数据
 
 on:
   schedule:
-    - cron: "0 1 * * *"
+    - cron: "0 0 * * *"
+    - cron: "30 7 * * *"
+    - cron: "30 8 * * *"
+    - cron: "0 12 * * *"
+    - cron: "0 16 * * *"
   workflow_dispatch:
 
 permissions:
