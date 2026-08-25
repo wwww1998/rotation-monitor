@@ -575,7 +575,7 @@ td:first-child {{ text-align: left; font-weight: 600; }}
         {tr_y_labels}
         {tr_x_labels}
       </svg>
-      <div id="trTooltip" style="position:absolute;display:none;pointer-events:none;background:#1a2332;color:white;padding:6px 10px;border-radius:6px;font-size:12px;z-index:10;white-space:nowrap;"></div>
+      <div id="trTooltip" style="position:absolute;display:none;pointer-events:none;background:#1a2332;color:white;padding:6px 12px;border-radius:6px;font-size:13px;z-index:10;white-space:nowrap;left:50%;transform:translateX(-50%);top:0;"></div>
     </div>
   </div>
 
@@ -656,17 +656,9 @@ td:first-child {{ text-align: left; font-weight: 600; }}
         hDot.setAttribute('cy', cy);
         hLine.setAttribute('opacity', '0.4');
         hDot.setAttribute('opacity', '1');
-        // 计算tooltip位置
-        var scale = svgRect.width / {TW};
-        var px = cx * scale + svgRect.left;
-        var py = cy * scale + svgRect.top;
+        // tooltip固定在图的上部中间
         tooltip.innerHTML = date + ' | 比值 ' + ratio + '%';
         tooltip.style.display = 'block';
-        var ttRect = tooltip.getBoundingClientRect();
-        var left = px + 12;
-        if (left + ttRect.width > window.innerWidth - 10) left = px - ttRect.width - 12;
-        tooltip.style.left = left + 'px';
-        tooltip.style.top = (py - 30) + 'px';
       }});
       pt.addEventListener('mouseleave', function() {{
         hLine.setAttribute('opacity', '0');
