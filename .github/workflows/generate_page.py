@@ -381,7 +381,8 @@ def generate_page():
         trade_rows += f"""          <tr><td>{t['date'].strftime('%Y-%m-%d')}</td><td>{t['action']}</td><td>{t['ratio']*100:.2f}%</td><td>{fmt_num(t['nav'])}</td></tr>\n"""
 
     # ── 生成HTML ──
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    from datetime import timezone, timedelta
+    now_str = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
     ratio_pct = ratio * 100; ratio_median_pct = ratio_median * 100
     ratio_pos = min(98, max(2, ((ratio_pct - 0) / (60 - 0)) * 100))
     cyb_chg_str, cyb_chg_cls = pct_str(cyb_chg); hldb_chg_str, hldb_chg_cls = pct_str(hldb_chg)
