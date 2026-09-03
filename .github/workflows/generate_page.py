@@ -112,27 +112,43 @@ def _seg(rows, start_i, end_i, pos):
     }
 
 # ─── matplotlib 三面板图 ─────────────────────────────────────────
-def add_nav_hover(svg, nav_df):
-    """在净值曲线 SVG 上注入悬停圆点（含日期/市值/比值/持仓）"""
+def add_unified_hover(svg, nav_df):
+    """在 SVG 上注入三面板联动悬停（十字线+三点标记+数据）"""
+    nav_pts = ratio_pts = dd_pts = None
     path_re = re.compile(r'<path d="([^"]*)"[^>]*style="([^"]*)"')
     for m in path_re.finditer(svg):
         d, style = m.group(1), m.group(2)
+        pts = re.findall(r'[ML]\s+([\d.]+)\s+([\d.]+)', d)
+        if len(pts) != len(nav_df):
+            continue
         if '2563eb' in style and 'stroke-width: 2' in style:
-            pts = re.findall(r'[ML]\s+([\d.]+)\s+([\d.]+)', d)
-            if len(pts) == len(nav_df) and all(float(p[1]) < 300 for p in pts):
-                circles = []
-                for i, (px, py) in enumerate(pts):
-                    row = nav_df.iloc[i]
-                    pos_label = '创业板' if row['position'] == 'cyb' else '红利低波'
-                    circles.append(
-                        f'<circle cx="{float(px):.2f}" cy="{float(py):.2f}" r="9" fill="transparent" '
-                        f'class="nav-hover-pt" data-date="{row["date"].strftime("%Y-%m-%d")}" '
-                        f'data-nav="{row["nav"]:.0f}" data-ratio="{row["ratio"]*100:.2f}" '
-                        f'data-pos="{pos_label}"/>'
-                    )
-                inject = "\n" + "\n".join(circles)
-                return svg.replace('</svg>', inject + '\n</svg>')
-    return svg
+            if all(float(p[1]) < 300 for p in pts):
+                nav_pts = pts      # Panel 1 净值曲线
+            else:
+                ratio_pts = pts    # Panel 2 比值曲线
+        elif 'ef4444' in style and 'stroke-width: 1.5' in style:
+            dd_pts = pts           # Panel 3 回撤曲线
+    if not (nav_pts and ratio_pts and dd_pts):
+        return svg
+    circles = []
+    for i in range(len(nav_df)):
+        row = nav_df.iloc[i]
+        pos_label = '创业板' if row['position'] == 'cyb' else '红利低波'
+        circles.append(
+            f'<circle cx="{float(nav_pts[i][0]):.2f}" cy="{float(nav_pts[i][1]):.2f}" r="9" fill="transparent" '
+            f'class="nav-hover-pt" data-date="{row["date"].strftime("%Y-%m-%d")}" '
+            f'data-nav="{row["nav"]:.0f}" data-ratio="{row["ratio"]*100:.2f}" '
+            f'data-dd="{row["drawdown"]:.2f}" data-pos="{pos_label}" '
+            f'data-y1="{float(nav_pts[i][1]):.2f}" data-y2="{float(ratio_pts[i][1]):.2f}" data-y3="{float(dd_pts[i][1]):.2f}"/>'
+        )
+    crosshair = (
+        '<line id="navCrosshair" x1="0" y1="27.6" x2="0" y2="582.2" stroke="#1a2332" stroke-width="1" opacity="0" pointer-events="none"/>'
+        '<circle id="navDot1" cx="0" cy="0" r="4.5" fill="#2563eb" stroke="white" stroke-width="1.5" opacity="0" pointer-events="none"/>'
+        '<circle id="navDot2" cx="0" cy="0" r="4.5" fill="#2563eb" stroke="white" stroke-width="1.5" opacity="0" pointer-events="none"/>'
+        '<circle id="navDot3" cx="0" cy="0" r="4.5" fill="#ef4444" stroke="white" stroke-width="1.5" opacity="0" pointer-events="none"/>'
+    )
+    inject = "\n" + crosshair + "\n" + "\n".join(circles)
+    return svg.replace('</svg>', inject + '\n</svg>')
 
 def setup_chinese_font():
     """设置中文字体，确保matplotlib正确渲染中文"""
@@ -296,8 +312,8 @@ def generate_chart(nav_df, trades, max_dd):
     svg_start = svg_str.find('<svg ')
     svg_end = svg_str.find('</svg>') + 6
     svg = svg_str[svg_start:svg_end]
-    # 注入净值曲线悬停点
-    svg = add_nav_hover(svg, nav_df)
+    # 注入三面板联动悬停点
+    svg = add_unified_hover(svg, nav_df)
     return svg
 
 # ─── 主页面生成 ────────────────────────────────────────────────
@@ -797,58 +813,78 @@ td:first-child {{ text-align: left; font-weight: 600; }}
     }});
   }})();
 
-  // 净值曲线悬停指标
+  // 三面板联动悬停指标（资产/比值/回撤 十字线联动）
   (function() {{
     var wrap = document.querySelector('.chart-wrap');
     var tooltip = document.getElementById('navTooltip');
     var svg = wrap ? wrap.querySelector('svg') : null;
     if (!wrap || !tooltip || !svg) return;
+    var crosshair = document.getElementById('navCrosshair');
+    var dot1 = document.getElementById('navDot1');
+    var dot2 = document.getElementById('navDot2');
+    var dot3 = document.getElementById('navDot3');
+    if (!crosshair || !dot1 || !dot2 || !dot3) return;
     var points = [];
     document.querySelectorAll('.nav-hover-pt').forEach(function(pt) {{
       points.push({{
         x: parseFloat(pt.getAttribute('cx')),
-        y: parseFloat(pt.getAttribute('cy')),
+        y1: parseFloat(pt.getAttribute('data-y1')),
+        y2: parseFloat(pt.getAttribute('data-y2')),
+        y3: parseFloat(pt.getAttribute('data-y3')),
         date: pt.getAttribute('data-date'),
         nav: parseFloat(pt.getAttribute('data-nav')),
         ratio: pt.getAttribute('data-ratio'),
+        dd: pt.getAttribute('data-dd'),
         pos: pt.getAttribute('data-pos')
       }});
     }});
     if (!points.length) return;
     var vb = svg.viewBox.baseVal;
     var vw = vb.width, vh = vb.height;
+    function showCross(x, y1, y2, y3) {{
+      crosshair.setAttribute('x1', x); crosshair.setAttribute('x2', x);
+      crosshair.setAttribute('opacity', '0.35');
+      dot1.setAttribute('cx', x); dot1.setAttribute('cy', y1); dot1.setAttribute('opacity', '1');
+      dot2.setAttribute('cx', x); dot2.setAttribute('cy', y2); dot2.setAttribute('opacity', '1');
+      dot3.setAttribute('cx', x); dot3.setAttribute('cy', y3); dot3.setAttribute('opacity', '1');
+    }}
+    function hideCross() {{
+      crosshair.setAttribute('opacity', '0');
+      dot1.setAttribute('opacity', '0');
+      dot2.setAttribute('opacity', '0');
+      dot3.setAttribute('opacity', '0');
+      tooltip.style.display = 'none';
+    }}
     svg.addEventListener('mousemove', function(e) {{
       var rect = wrap.getBoundingClientRect();
       var srect = svg.getBoundingClientRect();
       var scaleX = srect.width / vw;
-      var scaleY = srect.height / vh;
       var mx = (e.clientX - srect.left) / scaleX;
-      var my = (e.clientY - srect.top) / scaleY;
       var best = null, bestD = 999999;
       for (var i = 0; i < points.length; i++) {{
-        var dx = points[i].x - mx, dy = points[i].y - my;
-        var d = dx * dx + dy * dy;
+        var dx = points[i].x - mx;
+        var d = dx * dx;
         if (d < bestD) {{ bestD = d; best = points[i]; }}
       }}
-      var thr = 40 * 40 * scaleX * scaleX;
+      var thr = 35 * 35 * scaleX * scaleX;
       if (best && bestD < thr) {{
+        showCross(best.x, best.y1, best.y2, best.y3);
         tooltip.innerHTML = '<div style="font-weight:700;margin-bottom:2px;">' + best.date + '</div>' +
-          '<div>轮动市值：' + (best.nav / 10000).toFixed(2) + ' 万元</div>' +
+          '<div>资产：' + (best.nav / 10000).toFixed(2) + ' 万元</div>' +
           '<div>比值：' + best.ratio + '%</div>' +
+          '<div>回撤：' + best.dd + '%</div>' +
           '<div>持仓：' + best.pos + '</div>';
         tooltip.style.display = 'block';
         var tx = e.clientX - rect.left + 14;
         var ty = e.clientY - rect.top - 10;
-        if (tx + 180 > rect.width) tx = e.clientX - rect.left - 190;
+        if (tx + 200 > rect.width) tx = e.clientX - rect.left - 210;
         tooltip.style.left = tx + 'px';
         tooltip.style.top = ty + 'px';
       }} else {{
-        tooltip.style.display = 'none';
+        hideCross();
       }}
     }});
-    svg.addEventListener('mouseleave', function() {{
-      tooltip.style.display = 'none';
-    }});
+    svg.addEventListener('mouseleave', hideCross);
   }})();
   </script>
 
