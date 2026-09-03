@@ -252,6 +252,14 @@ def generate_page():
     hldb_chg = latest["hldb_pct"]
     ratio_median = merged["ratio"].median()
 
+    # 运行回测
+    print("运行回测...")
+    nav_df, max_dd = run_backtest(merged)
+    if nav_df is None: print("ERROR: 回测失败"); return
+
+    # 当前持仓（由回测状态机推导，用于20%-40%观望区间）
+    current_pos = nav_df['position'].iloc[-1]
+
     # 信号（基于固定阈值）
     ratio_pct = ratio * 100
     if ratio_pct < 20:
@@ -261,12 +269,12 @@ def generate_page():
         signal, hold, signal_class, reason = "买入红利低波", "红利低波 (H30269)", "buy-hldb", \
             f"比值 {ratio_pct:.2f}% > 40%，创业板相对高估，建议切换至红利低波。"
     else:
-        if ratio_pct < 30:
-            signal, hold, signal_class, reason = "建议持有创业板", "创业板指 (399006)", "hold-cyb", \
-                f"比值 {ratio_pct:.2f}%，处于20%-40%观望区间，偏创业板方向。"
+        if current_pos == 'cyb':
+            signal, hold, signal_class, reason = "维持持有创业板", "创业板指 (399006)", "hold-cyb", \
+                f"比值 {ratio_pct:.2f}%，处于20%-40%观望区间，维持当前持仓（创业板指）不变。"
         else:
-            signal, hold, signal_class, reason = "建议持有红利低波", "红利低波 (H30269)", "hold-hldb", \
-                f"比值 {ratio_pct:.2f}%，处于20%-40%观望区间，偏红利低波方向。"
+            signal, hold, signal_class, reason = "维持持有红利低波", "红利低波 (H30269)", "hold-hldb", \
+                f"比值 {ratio_pct:.2f}%，处于20%-40%观望区间，维持当前持仓（红利低波）不变。"
 
     signal_colors = {
         "buy-cyb": {"bg": "linear-gradient(135deg, #e3f2fd, #fff)", "border": "#2196f3", "text": "#1565c0"},
@@ -275,11 +283,6 @@ def generate_page():
         "hold-hldb": {"bg": "linear-gradient(135deg, #fff8e1, #fff)", "border": "#ff9800", "text": "#e65100"},
     }
     sc = signal_colors.get(signal_class, signal_colors["hold-hldb"])
-
-    # 运行回测
-    print("运行回测...")
-    nav_df, max_dd = run_backtest(merged)
-    if nav_df is None: print("ERROR: 回测失败"); return
 
     final_value = nav_df['nav'].iloc[-1]
     total_return_pct = (final_value / INITIAL_CAPITAL - 1) * 100
