@@ -163,11 +163,17 @@ def generate_chart(nav_df, trades, max_dd):
         ax.spines['right'].set_visible(False)
 
     # ── Panel 1: 净值曲线 ──
+    # 持仓段背景色块（蓝=持有创业板，橙=持有红利低波）
+    segs = compute_holding_segments(nav_df)
+    for s in segs:
+        seg_color = '#2563eb' if s['pos'] == 'cyb' else '#f59e0b'
+        ax1.axvspan(s['start'], s['end'], color=seg_color, alpha=0.08, zorder=0)
+
     ax1.plot(dates, nav / 1e6, color='#2563eb', linewidth=2, label='轮动策略', zorder=5)
     ax1.plot(dates, cyb / 1e6, color='#e74c3c', linewidth=1.5, linestyle='--', alpha=0.7, label='创业板（持有）')
     ax1.plot(dates, hldb / 1e6, color='#10b981', linewidth=1.5, linestyle='-.', alpha=0.7, label='红利低波（持有）')
 
-    # 买卖标记
+    # 买卖标记 + 调仓方向文字标注
     for t in trades:
         td = t['date']
         tv = t['nav'] / 1e6
@@ -175,6 +181,11 @@ def generate_chart(nav_df, trades, max_dd):
         color = '#4caf50' if is_buy else '#f44336'
         marker = '^' if is_buy else 'v'
         ax1.scatter(td, tv, c=color, s=100, marker=marker, edgecolors='black', linewidth=0.5, zorder=10)
+        label_txt = '红利→创业板' if is_buy else '创业板→红利'
+        ax1.annotate(label_txt, xy=(td, tv), xytext=(td, tv * 1.12),
+                     fontsize=9, color=color, fontweight='bold', ha='center',
+                     bbox=dict(boxstyle='round,pad=0.2', facecolor='white', edgecolor=color, alpha=0.9),
+                     arrowprops=dict(arrowstyle='->', color=color, lw=1))
 
     # 最大回撤标注
     max_dd_idx = np.argmin(dd)
@@ -189,7 +200,11 @@ def generate_chart(nav_df, trades, max_dd):
 
     ax1.set_ylabel('资产（百万元）', fontsize=11)
     ax1.set_title('轮动策略 vs 持有策略 收益对比（初始资产 100万元）', fontsize=13, fontweight='bold', pad=10)
-    ax1.legend(loc='upper left', fontsize=10, framealpha=0.9)
+    from matplotlib.patches import Patch
+    handles, labels = ax1.get_legend_handles_labels()
+    handles.append(Patch(color='#2563eb', alpha=0.25, label='持有创业板段'))
+    handles.append(Patch(color='#f59e0b', alpha=0.25, label='持有红利低波段'))
+    ax1.legend(handles=handles, loc='upper left', fontsize=10, framealpha=0.9)
     ax1.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f'{x:.1f}'))
     ax1.set_ylim(0, max(nav / 1e6) * 1.2)
 
