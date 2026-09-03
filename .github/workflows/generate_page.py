@@ -81,6 +81,35 @@ def run_backtest(data):
     max_dd = nav_df['drawdown'].min()
     return nav_df, max_dd
 
+def compute_holding_segments(nav_df):
+    """从回测净值逐日持仓中提取持仓段（含收益）"""
+    rows = nav_df.reset_index(drop=True)
+    segments = []
+    cur_pos = rows['position'].iloc[0]
+    seg_start = 0
+    for i in range(1, len(rows)):
+        pos_i = rows['position'].iloc[i]
+        if pos_i != cur_pos:
+            segments.append(_seg(rows, seg_start, i - 1, cur_pos))
+            seg_start = i
+            cur_pos = pos_i
+    segments.append(_seg(rows, seg_start, len(rows) - 1, cur_pos))
+    return segments
+
+def _seg(rows, start_i, end_i, pos):
+    s_nav = rows['nav'].iloc[start_i]
+    e_nav = rows['nav'].iloc[end_i]
+    ret = (e_nav / s_nav - 1) * 100 if s_nav else 0.0
+    return {
+        'start': rows['date'].iloc[start_i],
+        'end': rows['date'].iloc[end_i],
+        'pos': pos,
+        'label': '创业板' if pos == 'cyb' else '红利低波',
+        'start_nav': s_nav,
+        'end_nav': e_nav,
+        'ret': ret,
+    }
+
 # ─── matplotlib 三面板图 ─────────────────────────────────────────
 def setup_chinese_font():
     """设置中文字体，确保matplotlib正确渲染中文"""
@@ -390,6 +419,12 @@ def generate_page():
     for t in trades:
         trade_rows += f"""          <tr><td>{t['date'].strftime('%Y-%m-%d')}</td><td>{t['action']}</td><td>{t['ratio']*100:.2f}%</td><td>{fmt_num(t['nav'])}</td></tr>\n"""
 
+    # 持仓段收益明细（动态从回测提取）
+    segments = compute_holding_segments(nav_df)
+    seg_rows = ""
+    for i, s in enumerate(segments):
+        seg_rows += f"""          <tr><td>{s['start'].strftime('%Y.%m')}–{s['end'].strftime('%Y.%m')}</td><td>{s['label']}</td><td>{fmt_num(s['start_nav'])}</td><td>{fmt_num(s['end_nav'])}</td><td class="{ 'up' if s['ret'] > 0 else 'down' }">{s['ret']:+.2f}%</td></tr>\n"""
+
     # ── 生成HTML ──
     from datetime import timezone, timedelta
     now_str = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
@@ -629,6 +664,14 @@ td:first-child {{ text-align: left; font-weight: 600; }}
         <thead><tr><th>日期</th><th>操作</th><th>比值</th><th>市值</th></tr></thead>
         <tbody>
 {trade_rows}
+        </tbody>
+      </table>
+    </div>
+    <div class="table-wrap" style="margin-top:16px;">
+      <table>
+        <thead><tr><th>持仓段</th><th>持有</th><th>期初市值</th><th>期末市值</th><th>阶段收益</th></tr></thead>
+        <tbody>
+{seg_rows}
         </tbody>
       </table>
     </div>
