@@ -173,7 +173,7 @@ def generate_chart(nav_df, trades, max_dd):
     ax1.plot(dates, cyb / 1e6, color='#e74c3c', linewidth=1.5, linestyle='--', alpha=0.7, label='创业板（持有）')
     ax1.plot(dates, hldb / 1e6, color='#10b981', linewidth=1.5, linestyle='-.', alpha=0.7, label='红利低波（持有）')
 
-    # 买卖标记 + 调仓方向文字标注
+    # 买卖标记 + 调仓方向文字标注（含日期）
     for t in trades:
         td = t['date']
         tv = t['nav'] / 1e6
@@ -181,11 +181,22 @@ def generate_chart(nav_df, trades, max_dd):
         color = '#4caf50' if is_buy else '#f44336'
         marker = '^' if is_buy else 'v'
         ax1.scatter(td, tv, c=color, s=100, marker=marker, edgecolors='black', linewidth=0.5, zorder=10)
-        label_txt = '红利→创业板' if is_buy else '创业板→红利'
+        label_txt = f"{td.strftime('%Y.%m')} 红利→创业板" if is_buy else f"{td.strftime('%Y.%m')} 创业板→红利"
         ax1.annotate(label_txt, xy=(td, tv), xytext=(td, tv * 1.12),
                      fontsize=9, color=color, fontweight='bold', ha='center',
                      bbox=dict(boxstyle='round,pad=0.2', facecolor='white', edgecolor=color, alpha=0.9),
                      arrowprops=dict(arrowstyle='->', color=color, lw=1))
+
+    # 当前持仓标注
+    last_date = dates[-1]
+    last_nav = nav[-1] / 1e6
+    cur_pos = nav_df['position'].iloc[-1]
+    cur_color = '#f59e0b' if cur_pos == 'hldb' else '#2563eb'
+    cur_label = '当前 红利低波' if cur_pos == 'hldb' else '当前 创业板'
+    ax1.annotate(cur_label, xy=(last_date, last_nav), xytext=(last_date, last_nav * 1.12),
+                 fontsize=9, color=cur_color, fontweight='bold', ha='center',
+                 bbox=dict(boxstyle='round,pad=0.2', facecolor='white', edgecolor=cur_color, alpha=0.9),
+                 arrowprops=dict(arrowstyle='->', color=cur_color, lw=1))
 
     # 最大回撤标注
     max_dd_idx = np.argmin(dd)
