@@ -481,7 +481,10 @@ body {{
 .ratio-marker::after {{ content: ''; position: absolute; top: -6px; left: -5px; width: 14px; height: 14px; background: #1a2332; border-radius: 50%; }}
 .ratio-labels {{ display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 4px; }}
 .ratio-value-label {{ text-align: center; font-size: 24px; font-weight: 800; color: var(--accent); }}
-.ratio-thresholds {{ display: flex; justify-content: space-between; font-size: 12px; margin-top: 4px; }}
+.ratio-thresholds {{ display: flex; justify-content: space-between; font-size: 12px; margin-top: 6px; }}
+.ratio-thresholds span {{ flex: 1; text-align: center; }}
+.ratio-thresholds span:first-child {{ text-align: left; }}
+.ratio-thresholds span:last-child {{ text-align: right; }}
 .ratio-thresholds .buy {{ color: #4caf50; font-weight: 600; }}
 .ratio-thresholds .sell {{ color: #f44336; font-weight: 600; }}
 .section {{ background: var(--bg2); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px 24px; margin-bottom: 20px; }}
@@ -570,8 +573,10 @@ td:first-child {{ text-align: left; font-weight: 600; }}
       <div class="ratio-marker" style="left: {ratio_pos:.2f}%;"></div>
     </div>
     <div class="ratio-thresholds">
-      <span class="buy">0% ▼ 买入阈值 20%</span>
-      <span class="sell">卖出阈值 40% ▲ 60%+</span>
+      <span class="buy">0%</span>
+      <span class="buy">买入阈值 20%</span>
+      <span class="sell">卖出阈值 40%</span>
+      <span class="sell">刻度上限 60%</span>
     </div>
     <div class="ratio-labels">
       <span>买入创业板</span>
