@@ -6,6 +6,7 @@ import os
 import math
 import io
 import base64
+import re
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -111,6 +112,28 @@ def _seg(rows, start_i, end_i, pos):
     }
 
 # ─── matplotlib 三面板图 ─────────────────────────────────────────
+def add_nav_hover(svg, nav_df):
+    """在净值曲线 SVG 上注入悬停圆点（含日期/市值/比值/持仓）"""
+    path_re = re.compile(r'<path d="([^"]*)"[^>]*style="([^"]*)"')
+    for m in path_re.finditer(svg):
+        d, style = m.group(1), m.group(2)
+        if '2563eb' in style and 'stroke-width: 2' in style:
+            pts = re.findall(r'[ML]\s+([\d.]+)\s+([\d.]+)', d)
+            if len(pts) == len(nav_df) and all(float(p[1]) < 300 for p in pts):
+                circles = []
+                for i, (px, py) in enumerate(pts):
+                    row = nav_df.iloc[i]
+                    pos_label = '创业板' if row['position'] == 'cyb' else '红利低波'
+                    circles.append(
+                        f'<circle cx="{float(px):.2f}" cy="{float(py):.2f}" r="9" fill="transparent" '
+                        f'class="nav-hover-pt" data-date="{row["date"].strftime("%Y-%m-%d")}" '
+                        f'data-nav="{row["nav"]:.0f}" data-ratio="{row["ratio"]*100:.2f}" '
+                        f'data-pos="{pos_label}"/>'
+                    )
+                inject = "\n" + "\n".join(circles)
+                return svg.replace('</svg>', inject + '\n</svg>')
+    return svg
+
 def setup_chinese_font():
     """设置中文字体，确保matplotlib正确渲染中文"""
     plt.rcParams['axes.unicode_minus'] = False
@@ -141,6 +164,9 @@ def setup_chinese_font():
 
 def generate_chart(nav_df, trades, max_dd):
     """生成三面板图表并返回base64编码的SVG"""
+    # 关闭路径简化，保证 SVG 路径点数与数据行数一致（用于悬停定位）
+    plt.rcParams['path.simplify'] = False
+    plt.rcParams['path.simplify_threshold'] = 0
     has_cn = setup_chinese_font()
 
     # 回测数据
@@ -269,7 +295,10 @@ def generate_chart(nav_df, trades, max_dd):
     # 提取<svg>标签内的内容
     svg_start = svg_str.find('<svg ')
     svg_end = svg_str.find('</svg>') + 6
-    return svg_str[svg_start:svg_end]
+    svg = svg_str[svg_start:svg_end]
+    # 注入净值曲线悬停点
+    svg = add_nav_hover(svg, nav_df)
+    return svg
 
 # ─── 主页面生成 ────────────────────────────────────────────────
 def generate_page():
@@ -649,9 +678,10 @@ td:first-child {{ text-align: left; font-weight: 600; }}
   </div>
 
   <!-- 三面板回测图 -->
-  <div class="chart-wrap">
+  <div class="chart-wrap" style="position:relative;">
     <div class="section-title">轮动策略 vs 持有策略 收益对比（初始资产 100万元）</div>
     {chart_svg}
+    <div id="navTooltip" style="position:absolute;display:none;pointer-events:none;background:#1a2332;color:white;padding:8px 12px;border-radius:6px;font-size:13px;z-index:10;line-height:1.5;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.25);"></div>
   </div>
 
   <!-- 策略规则 -->
@@ -763,6 +793,60 @@ td:first-child {{ text-align: left; font-weight: 600; }}
     svg.addEventListener('touchend', function() {{
       hLine.setAttribute('opacity', '0');
       hDot.setAttribute('opacity', '0');
+      tooltip.style.display = 'none';
+    }});
+  }})();
+
+  // 净值曲线悬停指标
+  (function() {{
+    var wrap = document.querySelector('.chart-wrap');
+    var tooltip = document.getElementById('navTooltip');
+    var svg = wrap ? wrap.querySelector('svg') : null;
+    if (!wrap || !tooltip || !svg) return;
+    var points = [];
+    document.querySelectorAll('.nav-hover-pt').forEach(function(pt) {{
+      points.push({{
+        x: parseFloat(pt.getAttribute('cx')),
+        y: parseFloat(pt.getAttribute('cy')),
+        date: pt.getAttribute('data-date'),
+        nav: parseFloat(pt.getAttribute('data-nav')),
+        ratio: pt.getAttribute('data-ratio'),
+        pos: pt.getAttribute('data-pos')
+      }});
+    }});
+    if (!points.length) return;
+    var vb = svg.viewBox.baseVal;
+    var vw = vb.width, vh = vb.height;
+    svg.addEventListener('mousemove', function(e) {{
+      var rect = wrap.getBoundingClientRect();
+      var srect = svg.getBoundingClientRect();
+      var scaleX = srect.width / vw;
+      var scaleY = srect.height / vh;
+      var mx = (e.clientX - srect.left) / scaleX;
+      var my = (e.clientY - srect.top) / scaleY;
+      var best = null, bestD = 999999;
+      for (var i = 0; i < points.length; i++) {{
+        var dx = points[i].x - mx, dy = points[i].y - my;
+        var d = dx * dx + dy * dy;
+        if (d < bestD) {{ bestD = d; best = points[i]; }}
+      }}
+      var thr = 40 * 40 * scaleX * scaleX;
+      if (best && bestD < thr) {{
+        tooltip.innerHTML = '<div style="font-weight:700;margin-bottom:2px;">' + best.date + '</div>' +
+          '<div>轮动市值：' + (best.nav / 10000).toFixed(2) + ' 万元</div>' +
+          '<div>比值：' + best.ratio + '%</div>' +
+          '<div>持仓：' + best.pos + '</div>';
+        tooltip.style.display = 'block';
+        var tx = e.clientX - rect.left + 14;
+        var ty = e.clientY - rect.top - 10;
+        if (tx + 180 > rect.width) tx = e.clientX - rect.left - 190;
+        tooltip.style.left = tx + 'px';
+        tooltip.style.top = ty + 'px';
+      }} else {{
+        tooltip.style.display = 'none';
+      }}
+    }});
+    svg.addEventListener('mouseleave', function() {{
       tooltip.style.display = 'none';
     }});
   }})();
