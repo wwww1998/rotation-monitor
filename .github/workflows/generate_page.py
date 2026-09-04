@@ -101,7 +101,7 @@ def _seg(rows, start_i, end_i, pos):
     s_nav = rows['nav'].iloc[start_i]
     e_nav = rows['nav'].iloc[end_i]
     ret = (e_nav / s_nav - 1) * 100 if s_nav else 0.0
-    return {
+    seg = {
         'start': rows['date'].iloc[start_i],
         'end': rows['date'].iloc[end_i],
         'pos': pos,
@@ -110,6 +110,49 @@ def _seg(rows, start_i, end_i, pos):
         'end_nav': e_nav,
         'ret': ret,
     }
+    # 段内最大回撤 + 回撤修复天数（谷底→重新创新高，交易日）
+    nav_list = rows['nav'].iloc[start_i:end_i + 1].tolist()
+    date_list = rows['date'].iloc[start_i:end_i + 1].tolist()
+    n = len(nav_list)
+    peak_val = nav_list[0]
+    in_dd = False
+    trough = None
+    worst = None
+    for k in range(n):
+        if nav_list[k] > peak_val:
+            if in_dd and trough is not None:
+                if worst is None or trough['dd'] < worst['dd']:
+                    worst = {
+                        'dd': trough['dd'],
+                        'trough_date': trough['date'],
+                        'recovery_days': k - trough['idx'],
+                        'recover_date': date_list[k],
+                        'recovered': True,
+                    }
+                in_dd = False
+                trough = None
+            peak_val = nav_list[k]
+        else:
+            if not in_dd:
+                in_dd = True
+                dd_peak = peak_val
+                trough = {'dd': 0.0, 'idx': k, 'nav': nav_list[k], 'date': date_list[k]}
+            dd = (nav_list[k] / dd_peak - 1) * 100 if dd_peak else 0.0
+            if dd < trough['dd']:
+                trough['dd'] = dd
+                trough['idx'] = k
+                trough['nav'] = nav_list[k]
+                trough['date'] = date_list[k]
+    if in_dd and trough is not None:
+        if worst is None or trough['dd'] < worst['dd']:
+            worst = {'dd': trough['dd'], 'trough_date': trough['date'],
+                     'recovery_days': None, 'recover_date': None, 'recovered': False}
+    seg['max_dd'] = worst['dd'] if worst else 0.0
+    seg['max_dd_date'] = worst['trough_date'] if worst else None
+    seg['recovery_days'] = worst['recovery_days'] if worst else None
+    seg['recover_date'] = worst['recover_date'] if worst else None
+    seg['recovered'] = worst['recovered'] if worst else True
+    return seg
 
 # ─── matplotlib 三面板图 ─────────────────────────────────────────
 def add_unified_hover(svg, nav_df):
@@ -490,11 +533,22 @@ def generate_page():
     for t in trades:
         trade_rows += f"""          <tr><td>{t['date'].strftime('%Y-%m-%d')}</td><td>{t['action']}</td><td>{t['ratio']*100:.2f}%</td><td>{fmt_num(t['nav'])}</td></tr>\n"""
 
-    # 持仓段收益明细（动态从回测提取）
+    # 持仓段收益明细 + 回撤修复统计（动态从回测提取）
     segments = compute_holding_segments(nav_df)
     seg_rows = ""
-    for i, s in enumerate(segments):
-        seg_rows += f"""          <tr><td>{s['start'].strftime('%Y.%m')}–{s['end'].strftime('%Y.%m')}</td><td>{s['label']}</td><td>{fmt_num(s['start_nav'])}</td><td>{fmt_num(s['end_nav'])}</td><td class="{ 'up' if s['ret'] > 0 else 'down' }">{s['ret']:+.2f}%</td></tr>\n"""
+    for s in segments:
+        seg_start_fmt = s['start'].strftime('%Y.%m')
+        seg_end_fmt = s['end'].strftime('%Y.%m')
+        if s.get('recovered', True) and s.get('recovery_days') is not None:
+            nat_days = (pd.Timestamp(s['recover_date']) - pd.Timestamp(s['max_dd_date'])).days
+            rec_days_txt = f"{s['recovery_days']}"
+            rec_nat_txt = f"{nat_days}"
+            rec_date_txt = s['recover_date'].strftime('%Y-%m-%d') if hasattr(s['recover_date'], 'strftime') else s['recover_date']
+        else:
+            rec_days_txt = "—"
+            rec_nat_txt = "—"
+            rec_date_txt = "进行中"
+        seg_rows += f"""          <tr><td>{seg_start_fmt}–{seg_end_fmt}</td><td>{s['label']}</td><td>{fmt_num(s['start_nav'])}</td><td>{fmt_num(s['end_nav'])}</td><td class="{ 'up' if s['ret'] > 0 else 'down' }">{s['ret']:+.2f}%</td><td class="down">{s['max_dd']:.2f}%</td><td>{s['max_dd_date'].strftime('%Y-%m-%d') if s['max_dd_date'] is not None else '—'}</td><td>{rec_days_txt}</td><td>{rec_nat_txt}</td><td>{rec_date_txt}</td></tr>\n"""
 
     # ── 生成HTML ──
     from datetime import timezone, timedelta
@@ -746,7 +800,7 @@ td:first-child {{ text-align: left; font-weight: 600; }}
     </div>
     <div class="table-wrap" style="margin-top:16px;">
       <table>
-        <thead><tr><th>持仓段</th><th>持有</th><th>期初市值</th><th>期末市值</th><th>阶段收益</th></tr></thead>
+        <thead><tr><th>时间段</th><th>持有</th><th>期初市值</th><th>期末市值</th><th>阶段收益</th><th>最大回撤</th><th>回撤谷底日</th><th>修复天数<br>(交易日)</th><th>修复天数<br>(自然日)</th><th>修复完成日</th></tr></thead>
         <tbody>
 {seg_rows}
         </tbody>
