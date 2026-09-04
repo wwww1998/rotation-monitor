@@ -35,9 +35,12 @@ def fetch_index_data(code, market="sh", start_date="20100101"):
     except Exception as e:
         return None
 
-def normalize(df, close_col, date_col):
-    d = df[[date_col, close_col]].copy()
-    d.columns = ["date", "close"]
+def normalize(df, date_col, close_col, open_col=None):
+    cols = [date_col, close_col]
+    if open_col:
+        cols.append(open_col)
+    d = df[cols].copy()
+    d.columns = ["date", "close"] + (["open"] if open_col else [])
     d["date"] = pd.to_datetime(d["date"])
     d = d.sort_values("date").reset_index(drop=True)
     return d
@@ -54,6 +57,7 @@ def pct_str(val):
 
 # ─── 回测引擎 ───────────────────────────────────────────────────
 def run_backtest(data):
+    """基准版：当日收盘判定信号 → 下一交易日开盘价执行换仓"""
     bd = data[(data['date'] >= BACKTEST_START)].copy().reset_index(drop=True)
     if len(bd) < 20: return None, None
 
@@ -64,15 +68,33 @@ def run_backtest(data):
     hldb_start = bd.iloc[0]['close_hldb']
 
     nav_daily = []
-    for _, row in bd.iterrows():
+    trades = []
+    pending = None   # 收盘产生的信号，下一交易日开盘执行
+    for i, row in bd.iterrows():
         cp, hp, ratio = row['close_cyb'], row['close_hldb'], row['ratio']
+        # —— 上一交易日收盘信号，本交易日开盘执行 ——
+        if pending is not None:
+            oc = row['open_cyb'] if pd.notna(row['open_cyb']) else cp
+            oh = row['open_hldb'] if pd.notna(row['open_hldb']) else hp
+            # 开盘时手上持仓市值
+            mkt_open = shares_cyb * oc + shares_hldb * oh
+            if pending['target'] == 'cyb':
+                shares_cyb = mkt_open / oc; shares_hldb = 0.0
+            else:
+                shares_hldb = mkt_open / oh; shares_cyb = 0.0
+            position = pending['target']
+            trades.append({'date': row['date'], 'action': pending['action'], 'ratio': pending['ratio'],
+                           'nav': mkt_open, 'signal_date': pending['signal_date']})
+            pending = None
+        # —— 当日收盘市值（当前持仓）——
         mkt = shares_cyb * cp + shares_hldb * hp
         cyb_val = INITIAL_CAPITAL / cyb_start * cp
         hldb_val = INITIAL_CAPITAL / hldb_start * hp
+        # —— 收盘判定信号，次日执行 ——
         if position == 'hldb' and ratio < BUY_THRESHOLD:
-            shares_cyb = mkt / cp; shares_hldb = 0.0; position = 'cyb'
+            pending = {'target': 'cyb', 'ratio': ratio, 'action': '红利低波→创业板', 'signal_date': row['date']}
         elif position == 'cyb' and ratio > SELL_THRESHOLD:
-            shares_hldb = mkt / hp; shares_cyb = 0.0; position = 'hldb'
+            pending = {'target': 'hldb', 'ratio': ratio, 'action': '创业板→红利低波', 'signal_date': row['date']}
         nav_daily.append({'date': row['date'], 'nav': mkt, 'cyb_hold': cyb_val, 'hldb_hold': hldb_val,
                           'ratio': ratio, 'position': position})
 
@@ -81,6 +103,99 @@ def run_backtest(data):
     nav_df['drawdown'] = (nav_df['nav'].values - peak) / peak * 100
     max_dd = nav_df['drawdown'].min()
     return nav_df, max_dd
+
+# ─── RSI 抄底版回测引擎 ──────────────────────────────────────────
+RSI_PERIOD = 6          # 月K RSI 周期
+RSI_OVERSOLD = 20       # 超卖阈值：月K RSI < 20 才抄底
+RSI_MONTH_DROP = 5      # 月K跌幅阈值：上月月K跌幅 > 5% 才抄底
+
+def run_backtest_rsi(data):
+    """RSI 抄底版：
+    比值<20% 且 上月月K RSI(6)<20 且 上月月K跌幅>5% → 下月首个交易日买入创业板
+    其余时间空仓持现金；持有创业板中比值>40% → 卖回红利低波
+    """
+    bd = data[(data['date'] >= BACKTEST_START)].copy().reset_index(drop=True)
+    if len(bd) < 20: return None, None
+
+    # 计算创业板月K RSI(period) 与 月K跌幅，取"上月值"（无未来函数）
+    monthly = bd.set_index('date')['close_cyb'].resample('M').last()
+    dl = monthly.diff()
+    gain = dl.clip(lower=0).rolling(RSI_PERIOD).mean()
+    loss = (-dl.clip(upper=0)).rolling(RSI_PERIOD).mean()
+    rsi_m = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
+    rsi_m = rsi_m.replace([np.inf, -np.inf], np.nan)
+    lag = rsi_m.shift(1)
+    m = {ts: v for ts, v in lag.items()}
+    rsi_prev = bd['date'].apply(lambda ts: m.get(ts.replace(day=28) + pd.offsets.MonthEnd(0), np.nan)).values
+    # 上月月K跌幅（%）
+    drop_m = monthly.pct_change() * 100
+    drop_lag = drop_m.shift(1)
+    dm = {ts: v for ts, v in drop_lag.items()}
+    drop_prev = bd['date'].apply(lambda ts: dm.get(ts.replace(day=28) + pd.offsets.MonthEnd(0), np.nan)).values
+
+    position = 'hldb'
+    shares_cyb = 0.0
+    shares_hldb = INITIAL_CAPITAL / bd.iloc[0]['close_hldb']
+    cash_hold = 0.0
+    cyb_start = bd.iloc[0]['close_cyb']
+    hldb_start = bd.iloc[0]['close_hldb']
+
+    nav_daily = []
+    trades = []
+    pending = None   # 收盘产生的信号，下一交易日开盘执行
+    for i, row in bd.iterrows():
+        cp, hp, ratio = row['close_cyb'], row['close_hldb'], row['ratio']
+        oc = row['open_cyb'] if pd.notna(row['open_cyb']) else cp
+        oh = row['open_hldb'] if pd.notna(row['open_hldb']) else hp
+        rsi = rsi_prev[i]
+        drop = drop_prev[i]
+        is_first_td = i == 0 or (bd.iloc[i-1]['date'].month != bd.iloc[i]['date'].month)
+        # —— 上一交易日收盘信号，本交易日开盘执行 ——
+        if pending is not None:
+            if position == 'cyb': mkt_open = shares_cyb * oc
+            elif position == 'hldb': mkt_open = shares_hldb * oh
+            else: mkt_open = cash_hold
+            tgt = pending['target']
+            if tgt == 'cyb':
+                shares_cyb = mkt_open / oc; shares_hldb = 0.0; cash_hold = 0.0
+            elif tgt == 'hldb':
+                shares_hldb = mkt_open / oh; shares_cyb = 0.0; cash_hold = 0.0
+            else:  # cash
+                cash_hold = mkt_open; shares_cyb = 0.0; shares_hldb = 0.0
+            position = tgt
+            trades.append({'date': row['date'], 'action': pending['action'], 'ratio': pending['ratio'],
+                           'nav': mkt_open, 'signal_date': pending['signal_date']})
+            pending = None
+        if position == 'cyb':
+            val = shares_cyb * cp
+        elif position == 'hldb':
+            val = shares_hldb * hp
+        else:
+            val = cash_hold
+        cyb_val = INITIAL_CAPITAL / cyb_start * cp
+        hldb_val = INITIAL_CAPITAL / hldb_start * hp
+
+        # —— 收盘判定信号，次日开盘执行 ——
+        if position == 'cyb' and ratio > SELL_THRESHOLD:
+            pending = {'target': 'hldb', 'ratio': ratio, 'action': '创业板→红利低波', 'signal_date': row['date']}
+        elif position == 'hldb' and ratio < BUY_THRESHOLD:
+            pending = {'target': 'cash', 'ratio': ratio, 'action': '红利低波→空仓等待', 'signal_date': row['date']}
+        elif position == 'cash':
+            # 空仓：比值>40% 回红利（次日开盘执行）；否则每月首日若月K超卖则下日开盘买创业板
+            if ratio > SELL_THRESHOLD:
+                pending = {'target': 'hldb', 'ratio': ratio, 'action': '现金→红利低波', 'signal_date': row['date']}
+            elif is_first_td and not np.isnan(rsi) and rsi < RSI_OVERSOLD and not np.isnan(drop) and drop < -RSI_MONTH_DROP and ratio < SELL_THRESHOLD:
+                pending = {'target': 'cyb', 'ratio': ratio, 'action': '现金→创业板(RSI超卖+月跌)', 'signal_date': row['date']}
+
+        nav_daily.append({'date': row['date'], 'nav': shares_cyb * cp + shares_hldb * hp + cash_hold,
+                          'cyb_hold': cyb_val, 'hldb_hold': hldb_val,
+                          'ratio': ratio, 'position': position})
+
+    nav_df = pd.DataFrame(nav_daily)
+    peak = np.maximum.accumulate(nav_df['nav'].values)
+    nav_df['drawdown'] = (nav_df['nav'].values - peak) / peak * 100
+    max_dd = nav_df['drawdown'].min()
+    return nav_df, max_dd, trades
 
 def compute_holding_segments(nav_df):
     """从回测净值逐日持仓中提取持仓段（含收益）"""
@@ -105,7 +220,7 @@ def _seg(rows, start_i, end_i, pos):
         'start': rows['date'].iloc[start_i],
         'end': rows['date'].iloc[end_i],
         'pos': pos,
-        'label': '创业板' if pos == 'cyb' else '红利低波',
+        'label': '创业板' if pos == 'cyb' else ('空仓' if pos == 'cash' else '红利低波'),
         'start_nav': s_nav,
         'end_nav': e_nav,
         'ret': ret,
@@ -155,7 +270,7 @@ def _seg(rows, start_i, end_i, pos):
     return seg
 
 # ─── matplotlib 三面板图 ─────────────────────────────────────────
-def add_unified_hover(svg, nav_df):
+def add_unified_hover(svg, nav_df, id_prefix='nav', hover_class='nav-hover-pt'):
     """在 SVG 上注入三面板联动悬停（十字线+三点标记+数据）"""
     nav_pts = ratio_pts = dd_pts = None
     path_re = re.compile(r'<path d="([^"]*)"[^>]*style="([^"]*)"')
@@ -176,19 +291,24 @@ def add_unified_hover(svg, nav_df):
     circles = []
     for i in range(len(nav_df)):
         row = nav_df.iloc[i]
-        pos_label = '创业板' if row['position'] == 'cyb' else '红利低波'
+        if row['position'] == 'cyb':
+            pos_label = '创业板'
+        elif row['position'] == 'hldb':
+            pos_label = '红利低波'
+        else:
+            pos_label = '空仓'
         circles.append(
             f'<circle cx="{float(nav_pts[i][0]):.2f}" cy="{float(nav_pts[i][1]):.2f}" r="9" fill="transparent" '
-            f'class="nav-hover-pt" data-date="{row["date"].strftime("%Y-%m-%d")}" '
+            f'class="{hover_class}" data-date="{row["date"].strftime("%Y-%m-%d")}" '
             f'data-nav="{row["nav"]:.0f}" data-ratio="{row["ratio"]*100:.2f}" '
             f'data-dd="{row["drawdown"]:.2f}" data-pos="{pos_label}" '
             f'data-y1="{float(nav_pts[i][1]):.2f}" data-y2="{float(ratio_pts[i][1]):.2f}" data-y3="{float(dd_pts[i][1]):.2f}"/>'
         )
     crosshair = (
-        '<line id="navCrosshair" x1="0" y1="27.6" x2="0" y2="582.2" stroke="#1a2332" stroke-width="1" opacity="0" pointer-events="none"/>'
-        '<circle id="navDot1" cx="0" cy="0" r="4.5" fill="#2563eb" stroke="white" stroke-width="1.5" opacity="0" pointer-events="none"/>'
-        '<circle id="navDot2" cx="0" cy="0" r="4.5" fill="#2563eb" stroke="white" stroke-width="1.5" opacity="0" pointer-events="none"/>'
-        '<circle id="navDot3" cx="0" cy="0" r="4.5" fill="#ef4444" stroke="white" stroke-width="1.5" opacity="0" pointer-events="none"/>'
+        f'<line id="{id_prefix}Crosshair" x1="0" y1="27.6" x2="0" y2="582.2" stroke="#1a2332" stroke-width="1" opacity="0" pointer-events="none"/>'
+        f'<circle id="{id_prefix}Dot1" cx="0" cy="0" r="4.5" fill="#2563eb" stroke="white" stroke-width="1.5" opacity="0" pointer-events="none"/>'
+        f'<circle id="{id_prefix}Dot2" cx="0" cy="0" r="4.5" fill="#2563eb" stroke="white" stroke-width="1.5" opacity="0" pointer-events="none"/>'
+        f'<circle id="{id_prefix}Dot3" cx="0" cy="0" r="4.5" fill="#ef4444" stroke="white" stroke-width="1.5" opacity="0" pointer-events="none"/>'
     )
     inject = "\n" + crosshair + "\n" + "\n".join(circles)
     return svg.replace('</svg>', inject + '\n</svg>')
@@ -221,7 +341,7 @@ def setup_chinese_font():
     print("未找到中文字体，使用DejaVu Sans（中文可能显示为方框）")
     return False
 
-def generate_chart(nav_df, trades, max_dd):
+def generate_chart(nav_df, trades, max_dd, title_suffix='', hover_prefix='nav', hover_class='nav-hover-pt'):
     """生成三面板图表并返回base64编码的SVG"""
     # 关闭路径简化，保证 SVG 路径点数与数据行数一致（用于悬停定位）
     plt.rcParams['path.simplify'] = False
@@ -248,10 +368,15 @@ def generate_chart(nav_df, trades, max_dd):
         ax.spines['right'].set_visible(False)
 
     # ── Panel 1: 净值曲线 ──
-    # 持仓段背景色块（蓝=持有创业板，橙=持有红利低波）
+    # 持仓段背景色块（蓝=持有创业板，橙=持有红利低波，灰=空仓）
     segs = compute_holding_segments(nav_df)
     for s in segs:
-        seg_color = '#2563eb' if s['pos'] == 'cyb' else '#f59e0b'
+        if s['pos'] == 'cyb':
+            seg_color = '#2563eb'
+        elif s['pos'] == 'hldb':
+            seg_color = '#f59e0b'
+        else:
+            seg_color = '#9ca3af'
         ax1.axvspan(s['start'], s['end'], color=seg_color, alpha=0.08, zorder=0)
 
     ax1.plot(dates, nav / 1e6, color='#2563eb', linewidth=2, label='轮动策略', zorder=5)
@@ -276,8 +401,12 @@ def generate_chart(nav_df, trades, max_dd):
     last_date = dates[-1]
     last_nav = nav[-1] / 1e6
     cur_pos = nav_df['position'].iloc[-1]
-    cur_color = '#f59e0b' if cur_pos == 'hldb' else '#2563eb'
-    cur_label = '当前 红利低波' if cur_pos == 'hldb' else '当前 创业板'
+    if cur_pos == 'hldb':
+        cur_color, cur_label = '#f59e0b', '当前 红利低波'
+    elif cur_pos == 'cyb':
+        cur_color, cur_label = '#2563eb', '当前 创业板'
+    else:
+        cur_color, cur_label = '#6b7280', '当前 空仓'
     ax1.annotate(cur_label, xy=(last_date, last_nav), xytext=(last_date, last_nav * 1.12),
                  fontsize=9, color=cur_color, fontweight='bold', ha='center',
                  bbox=dict(boxstyle='round,pad=0.2', facecolor='white', edgecolor=cur_color, alpha=0.9),
@@ -295,11 +424,13 @@ def generate_chart(nav_df, trades, max_dd):
                  arrowprops=dict(arrowstyle='->', color='#dc2626', lw=1.5))
 
     ax1.set_ylabel('资产（百万元）', fontsize=11)
-    ax1.set_title('轮动策略 vs 持有策略 收益对比（初始资产 100万元）', fontsize=13, fontweight='bold', pad=10)
+    ax1.set_title('轮动策略 vs 持有策略 收益对比（初始资产 100万元）' + title_suffix, fontsize=13, fontweight='bold', pad=10)
     from matplotlib.patches import Patch
     handles, labels = ax1.get_legend_handles_labels()
     handles.append(Patch(color='#2563eb', alpha=0.25, label='持有创业板段'))
     handles.append(Patch(color='#f59e0b', alpha=0.25, label='持有红利低波段'))
+    if 'cash' in set(nav_df['position'].values):
+        handles.append(Patch(color='#9ca3af', alpha=0.25, label='空仓段'))
     ax1.legend(handles=handles, loc='upper left', fontsize=10, framealpha=0.9)
     ax1.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f'{x:.1f}'))
     ax1.set_ylim(0, max(nav / 1e6) * 1.2)
@@ -356,7 +487,7 @@ def generate_chart(nav_df, trades, max_dd):
     svg_end = svg_str.find('</svg>') + 6
     svg = svg_str[svg_start:svg_end]
     # 注入三面板联动悬停点
-    svg = add_unified_hover(svg, nav_df)
+    svg = add_unified_hover(svg, nav_df, id_prefix=hover_prefix, hover_class=hover_class)
     return svg
 
 # ─── 主页面生成 ────────────────────────────────────────────────
@@ -368,16 +499,18 @@ def generate_page():
     hldb_df = fetch_index_data(HLDB_CODE)
     if hldb_df is None: print("ERROR: 无法获取红利低波指数数据"); return
 
-    if "date" in cyb_df.columns: cyb = normalize(cyb_df, "close", "date")
-    elif "日期" in cyb_df.columns: cyb = normalize(cyb_df, "收盘", "日期")
+    opts_cyb_open = "open" if "open" in cyb_df.columns else ("开盘" if "开盘" in cyb_df.columns else None)
+    if "date" in cyb_df.columns: cyb = normalize(cyb_df, "date", "close", opts_cyb_open)
+    elif "日期" in cyb_df.columns: cyb = normalize(cyb_df, "日期", "收盘", None)
     else: print("ERROR: 无法识别创业板数据列名"); return
 
-    if "date" in hldb_df.columns: hldb = normalize(hldb_df, "close", "date")
-    elif "日期" in hldb_df.columns: hldb = normalize(hldb_df, "收盘", "日期")
+    opts_hldb_open = "open" if "open" in hldb_df.columns else ("开盘" if "开盘" in hldb_df.columns else None)
+    if "date" in hldb_df.columns: hldb = normalize(hldb_df, "date", "close", opts_hldb_open)
+    elif "日期" in hldb_df.columns: hldb = normalize(hldb_df, "日期", "收盘", opts_hldb_open)
     else: print("ERROR: 无法识别红利低波数据列名"); return
 
     merged = pd.merge(cyb, hldb, on="date", how="inner", suffixes=("_cyb", "_hldb"))
-    merged = merged.dropna().reset_index(drop=True)
+    merged = merged.dropna(subset=["close_cyb", "close_hldb"]).reset_index(drop=True)
     if len(merged) < 20: print("ERROR: 数据不足"); return
 
     merged["ratio"] = merged["close_cyb"] / merged["close_hldb"]
@@ -399,6 +532,11 @@ def generate_page():
     print("运行回测...")
     nav_df, max_dd = run_backtest(merged)
     if nav_df is None: print("ERROR: 回测失败"); return
+
+    # 运行 RSI 抄底版回测
+    print("运行 RSI 抄底版回测...")
+    rsi_nav_df, rsi_max_dd, rsi_trades = run_backtest_rsi(merged)
+    if rsi_nav_df is None: print("ERROR: RSI 回测失败"); return
 
     # 当前持仓（由回测状态机推导，用于20%-40%观望区间）
     current_pos = nav_df['position'].iloc[-1]
@@ -450,6 +588,13 @@ def generate_page():
     # 生成matplotlib三面板图
     print("生成图表...")
     chart_svg = generate_chart(nav_df, trades, max_dd)
+
+    # RSI 抄底版指标
+    rsi_final = rsi_nav_df['nav'].iloc[-1]
+    rsi_total_return_pct = (rsi_final / INITIAL_CAPITAL - 1) * 100
+    rsi_years = (rsi_nav_df['date'].iloc[-1] - rsi_nav_df['date'].iloc[0]).days / 365.25
+    rsi_annual_return_pct = ((rsi_final / INITIAL_CAPITAL) ** (1 / rsi_years) - 1) * 100
+    rsi_chart_svg = generate_chart(rsi_nav_df, rsi_trades, rsi_max_dd, title_suffix='（RSI 抄底版）', hover_prefix='rsiNav', hover_class='rsi-hover-pt')
 
     # 近5日数据
     recent_5 = merged.tail(5).iloc[::-1]
@@ -537,8 +682,8 @@ def generate_page():
     segments = compute_holding_segments(nav_df)
     seg_rows = ""
     for s in segments:
-        seg_start_fmt = s['start'].strftime('%Y.%m')
-        seg_end_fmt = s['end'].strftime('%Y.%m')
+        seg_start_fmt = s['start'].strftime('%Y-%m-%d')
+        seg_end_fmt = s['end'].strftime('%Y-%m-%d')
         if s.get('recovered', True) and s.get('recovery_days') is not None:
             nat_days = (pd.Timestamp(s['recover_date']) - pd.Timestamp(s['max_dd_date'])).days
             rec_days_txt = f"{s['recovery_days']}"
@@ -547,8 +692,31 @@ def generate_page():
         else:
             rec_days_txt = "—"
             rec_nat_txt = "—"
-            rec_date_txt = "进行中"
+            rec_date_txt = "空仓" if s.get('pos') == 'cash' else "进行中"
         seg_rows += f"""          <tr><td>{seg_start_fmt}–{seg_end_fmt}</td><td>{s['label']}</td><td>{fmt_num(s['start_nav'])}</td><td>{fmt_num(s['end_nav'])}</td><td class="{ 'up' if s['ret'] > 0 else 'down' }">{s['ret']:+.2f}%</td><td class="down">{s['max_dd']:.2f}%</td><td>{s['max_dd_date'].strftime('%Y-%m-%d') if s['max_dd_date'] is not None else '—'}</td><td>{rec_days_txt}</td><td>{rec_nat_txt}</td><td>{rec_date_txt}</td></tr>\n"""
+
+    # RSI 抄底版：交易记录 + 持仓段明细
+    rsi_trade_rows = ""
+    for t in rsi_trades:
+        rsi_trade_rows += f"""          <tr><td>{t['date'].strftime('%Y-%m-%d')}</td><td>{t['action']}</td><td>{t['ratio']*100:.2f}%</td><td>{fmt_num(t['nav'])}</td></tr>\n"""
+    rsi_segments = compute_holding_segments(rsi_nav_df)
+    rsi_seg_rows = ""
+    for s in rsi_segments:
+        seg_start_fmt = s['start'].strftime('%Y-%m-%d')
+        seg_end_fmt = s['end'].strftime('%Y-%m-%d')
+        if s.get('recovered', True) and s.get('recovery_days') is not None:
+            nat_days = (pd.Timestamp(s['recover_date']) - pd.Timestamp(s['max_dd_date'])).days
+            rec_days_txt = f"{s['recovery_days']}"
+            rec_nat_txt = f"{nat_days}"
+            rec_date_txt = s['recover_date'].strftime('%Y-%m-%d') if hasattr(s['recover_date'], 'strftime') else s['recover_date']
+        else:
+            rec_days_txt = "—"
+            rec_nat_txt = "—"
+            rec_date_txt = "空仓" if s.get('pos') == 'cash' else "进行中"
+        rsi_seg_rows += f"""          <tr><td>{seg_start_fmt}–{seg_end_fmt}</td><td>{s['label']}</td><td>{fmt_num(s['start_nav'])}</td><td>{fmt_num(s['end_nav'])}</td><td class="{ 'up' if s['ret'] > 0 else 'down' }">{s['ret']:+.2f}%</td><td class="down">{s['max_dd']:.2f}%</td><td>{s['max_dd_date'].strftime('%Y-%m-%d') if s['max_dd_date'] is not None else '—'}</td><td>{rec_days_txt}</td><td>{rec_nat_txt}</td><td>{rec_date_txt}</td></tr>\n"""
+    # RSI 版当前持仓
+    rsi_cur_pos = rsi_nav_df['position'].iloc[-1]
+    rsi_cur_label = '创业板' if rsi_cur_pos == 'cyb' else ('红利低波' if rsi_cur_pos == 'hldb' else '空仓')
 
     # ── 生成HTML ──
     from datetime import timezone, timedelta
@@ -808,6 +976,59 @@ td:first-child {{ text-align: left; font-weight: 600; }}
     </div>
   </div>
 
+  <!-- RSI 抄底版（优化方案） -->
+  <div class="section" style="border-top: 4px solid #9c27b0;">
+    <div class="section-title">RSI 抄底版（优化方案）· 当前持仓：{rsi_cur_label}</div>
+    <div class="rules-grid" style="grid-template-columns: 1fr 1fr;">
+      <div class="rule-card" style="border-left: 4px solid #9c27b0;">
+        <div class="rule-title">买入创业板（需月线超卖+月跌）</div>
+        <div class="rule-desc">比值 &lt; 20% 且 创业板月K RSI(6) &lt; 20（极度超卖）且 上月月K下跌超 5% → 下月首个交易日买入创业板</div>
+      </div>
+      <div class="rule-card" style="border-left: 4px solid #9c27b0;">
+        <div class="rule-title">空仓等待</div>
+        <div class="rule-desc">比值 &lt; 20% 但 月K RSI(6) ≥ 20 或 月K下跌 ≤ 5% → 不进场，空仓持现金等待超卖+大跌信号</div>
+      </div>
+      <div class="rule-card sell">
+        <div class="rule-title">卖出</div>
+        <div class="rule-desc">持有创业板中比值 &gt; 40% → 全仓切换至红利低波（保持原逻辑）</div>
+      </div>
+      <div class="rule-card" style="border-left: 4px solid #9c27b0;">
+        <div class="rule-title">初始持仓</div>
+        <div class="rule-desc">初始买入红利低波，全仓操作，不含交易成本</div>
+      </div>
+    </div>
+    <div class="backtest-grid" style="margin-top:12px;">
+      <div class="bt-card"><div class="bt-label">总收益率</div><div class="bt-value" style="color:#9c27b0">{rsi_total_return_pct:.2f}%</div></div>
+      <div class="bt-card"><div class="bt-label">年化收益率</div><div class="bt-value" style="color:#9c27b0">{rsi_annual_return_pct:.2f}%</div></div>
+      <div class="bt-card"><div class="bt-label">最大回撤</div><div class="bt-value" style="color:var(--danger)">{rsi_max_dd:.2f}%</div></div>
+    </div>
+    <div class="backtest-grid" style="margin-top:8px;">
+      <div class="bt-card"><div class="bt-label">对比基准总收益</div><div class="bt-value" style="color:var(--muted)">{total_return_pct:.2f}%</div></div>
+      <div class="bt-card"><div class="bt-label">对比基准最大回撤</div><div class="bt-value" style="color:var(--muted)">{max_dd:.2f}%</div></div>
+      <div class="bt-card"><div class="bt-label">交易次数</div><div class="bt-value">{len(rsi_trades)} 次</div></div>
+    </div>
+    <div class="chart-wrap" id="rsiChartWrap" style="margin-top:16px; padding:0; box-shadow:none; background:transparent; position:relative;">
+      {rsi_chart_svg}
+      <div id="rsiNavTooltip" style="position:absolute;display:none;pointer-events:none;background:#1a2332;color:white;padding:8px 12px;border-radius:6px;font-size:13px;z-index:10;line-height:1.5;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.25);"></div>
+    </div>
+    <div class="table-wrap" style="margin-top:12px;">
+      <table>
+        <thead><tr><th>日期</th><th>操作</th><th>比值</th><th>市值</th></tr></thead>
+        <tbody>
+{rsi_trade_rows}
+        </tbody>
+      </table>
+    </div>
+    <div class="table-wrap" style="margin-top:16px;">
+      <table>
+        <thead><tr><th>时间段</th><th>持有</th><th>期初市值</th><th>期末市值</th><th>阶段收益</th><th>最大回撤</th><th>回撤谷底日</th><th>修复天数<br>(交易日)</th><th>修复天数<br>(自然日)</th><th>修复完成日</th></tr></thead>
+        <tbody>
+{rsi_seg_rows}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- 悬停交互脚本 -->
   <script>
   (function() {{
@@ -880,6 +1101,81 @@ td:first-child {{ text-align: left; font-weight: 600; }}
     if (!crosshair || !dot1 || !dot2 || !dot3) return;
     var points = [];
     document.querySelectorAll('.nav-hover-pt').forEach(function(pt) {{
+      points.push({{
+        x: parseFloat(pt.getAttribute('cx')),
+        y1: parseFloat(pt.getAttribute('data-y1')),
+        y2: parseFloat(pt.getAttribute('data-y2')),
+        y3: parseFloat(pt.getAttribute('data-y3')),
+        date: pt.getAttribute('data-date'),
+        nav: parseFloat(pt.getAttribute('data-nav')),
+        ratio: pt.getAttribute('data-ratio'),
+        dd: pt.getAttribute('data-dd'),
+        pos: pt.getAttribute('data-pos')
+      }});
+    }});
+    if (!points.length) return;
+    var vb = svg.viewBox.baseVal;
+    var vw = vb.width, vh = vb.height;
+    function showCross(x, y1, y2, y3) {{
+      crosshair.setAttribute('x1', x); crosshair.setAttribute('x2', x);
+      crosshair.setAttribute('opacity', '0.35');
+      dot1.setAttribute('cx', x); dot1.setAttribute('cy', y1); dot1.setAttribute('opacity', '1');
+      dot2.setAttribute('cx', x); dot2.setAttribute('cy', y2); dot2.setAttribute('opacity', '1');
+      dot3.setAttribute('cx', x); dot3.setAttribute('cy', y3); dot3.setAttribute('opacity', '1');
+    }}
+    function hideCross() {{
+      crosshair.setAttribute('opacity', '0');
+      dot1.setAttribute('opacity', '0');
+      dot2.setAttribute('opacity', '0');
+      dot3.setAttribute('opacity', '0');
+      tooltip.style.display = 'none';
+    }}
+    svg.addEventListener('mousemove', function(e) {{
+      var rect = wrap.getBoundingClientRect();
+      var srect = svg.getBoundingClientRect();
+      var scaleX = srect.width / vw;
+      var mx = (e.clientX - srect.left) / scaleX;
+      var best = null, bestD = 999999;
+      for (var i = 0; i < points.length; i++) {{
+        var dx = points[i].x - mx;
+        var d = dx * dx;
+        if (d < bestD) {{ bestD = d; best = points[i]; }}
+      }}
+      var thr = 35 * 35 * scaleX * scaleX;
+      if (best && bestD < thr) {{
+        showCross(best.x, best.y1, best.y2, best.y3);
+        tooltip.innerHTML = '<div style="font-weight:700;margin-bottom:2px;">' + best.date + '</div>' +
+          '<div>资产：' + (best.nav / 10000).toFixed(2) + ' 万元</div>' +
+          '<div>比值：' + best.ratio + '%</div>' +
+          '<div>回撤：' + best.dd + '%</div>' +
+          '<div>持仓：' + best.pos + '</div>';
+        tooltip.style.display = 'block';
+        var tx = e.clientX - rect.left + 14;
+        var ty = e.clientY - rect.top - 10;
+        if (tx + 200 > rect.width) tx = e.clientX - rect.left - 210;
+        tooltip.style.left = tx + 'px';
+        tooltip.style.top = ty + 'px';
+      }} else {{
+        hideCross();
+      }}
+    }});
+    svg.addEventListener('mouseleave', hideCross);
+  }})();
+
+  // RSI 抄底版三面板联动悬停
+  (function() {{
+    var wrap = document.getElementById('rsiChartWrap');
+    var tooltip = document.getElementById('rsiNavTooltip');
+    if (!wrap || !tooltip) return;
+    var svg = wrap.querySelector('svg');
+    if (!svg) return;
+    var crosshair = document.getElementById('rsiNavCrosshair');
+    var dot1 = document.getElementById('rsiNavDot1');
+    var dot2 = document.getElementById('rsiNavDot2');
+    var dot3 = document.getElementById('rsiNavDot3');
+    if (!crosshair || !dot1 || !dot2 || !dot3) return;
+    var points = [];
+    wrap.querySelectorAll('.rsi-hover-pt').forEach(function(pt) {{
       points.push({{
         x: parseFloat(pt.getAttribute('cx')),
         y1: parseFloat(pt.getAttribute('data-y1')),
