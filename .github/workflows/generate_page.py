@@ -102,7 +102,7 @@ def run_backtest(data):
     peak = np.maximum.accumulate(nav_df['nav'].values)
     nav_df['drawdown'] = (nav_df['nav'].values - peak) / peak * 100
     max_dd = nav_df['drawdown'].min()
-    return nav_df, max_dd
+    return nav_df, max_dd, trades
 
 # ─── RSI 抄底版回测引擎 ──────────────────────────────────────────
 RSI_PERIOD = 6          # 月K RSI 周期
@@ -530,7 +530,7 @@ def generate_page():
 
     # 运行回测
     print("运行回测...")
-    nav_df, max_dd = run_backtest(merged)
+    nav_df, max_dd, trades = run_backtest(merged)
     if nav_df is None: print("ERROR: 回测失败"); return
 
     # 运行 RSI 抄底版回测
@@ -573,17 +573,6 @@ def generate_page():
     hldb_return_pct = (nav_df['hldb_hold'].iloc[-1] / INITIAL_CAPITAL - 1) * 100
     current_drawdown = nav_df['drawdown'].iloc[-1]
 
-    # 交易记录
-    trades = []
-    pos = 'hldb'
-    for _, row in nav_df.iterrows():
-        r = row['ratio']
-        if pos == 'hldb' and r < BUY_THRESHOLD:
-            trades.append({'date': row['date'], 'action': '红利低波→创业板', 'ratio': r, 'nav': row['nav']})
-            pos = 'cyb'
-        elif pos == 'cyb' and r > SELL_THRESHOLD:
-            trades.append({'date': row['date'], 'action': '创业板→红利低波', 'ratio': r, 'nav': row['nav']})
-            pos = 'hldb'
 
     # 生成matplotlib三面板图
     print("生成图表...")
