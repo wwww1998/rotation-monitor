@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -38,6 +38,19 @@ jobs:
 
       - name: 生成监控页面
         run: python .github/workflows/generate_page.py
+
+      - name: 同步完整 index.html 到 main 分支（供 EdgeOne Pages 检出）
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # 只跟踪 public/index.html，其他 public 产物不纳入
+          git add -f public/index.html
+          if git diff --cached --quiet; then
+            echo "no change, skip commit"
+          else
+            git commit -m "chore: 每日更新监控页面 (auto-commit for EdgeOne Pages)"
+            git push origin main
+          fi
 
       - name: 上传 Pages 制品
         uses: actions/upload-pages-artifact@v3
