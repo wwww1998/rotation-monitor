@@ -599,10 +599,10 @@ def generate_page():
     # 近5日数据
     recent_5 = merged.tail(5).iloc[::-1]
 
-    # 1年趋势SVG（约250个交易日）
-    trend_1y = merged.tail(250).reset_index(drop=True)
-    tr_min = trend_1y["ratio"].min() * 100
-    tr_max = trend_1y["ratio"].max() * 100
+    # 10年趋势SVG（约2500个交易日）
+    trend_10y = merged.tail(2500).reset_index(drop=True)
+    tr_min = trend_10y["ratio"].min() * 100
+    tr_max = trend_10y["ratio"].max() * 100
     tr_pad = (tr_max - tr_min) * 0.1 or 5
     tr_y_min = tr_min - tr_pad
     tr_y_max = tr_max + tr_pad
@@ -610,20 +610,20 @@ def generate_page():
     t_pad_l, t_pad_r, t_pad_t, t_pad_b = 50, 30, 20, 30
     t_plot_w = TW - t_pad_l - t_pad_r
     t_plot_h = TH - t_pad_t - t_pad_b
-    def tx(idx): return t_pad_l + (idx / (len(trend_1y) - 1)) * t_plot_w
+    def tx(idx): return t_pad_l + (idx / (len(trend_10y) - 1)) * t_plot_w
     def ty(val_pct):
         rng = tr_y_max - tr_y_min if tr_y_max > tr_y_min else 1
         return t_pad_t + t_plot_h - ((val_pct - tr_y_min) / rng) * t_plot_h
-    tr_pts = " ".join(f"{tx(i):.1f},{ty(row['ratio']*100):.1f}" for i, (_, row) in enumerate(trend_1y.iterrows()))
+    tr_pts = " ".join(f"{tx(i):.1f},{ty(row['ratio']*100):.1f}" for i, (_, row) in enumerate(trend_10y.iterrows()))
     # 悬停点
     tr_hover = ""
-    for i, (_, row) in enumerate(trend_1y.iterrows()):
+    for i, (_, row) in enumerate(trend_10y.iterrows()):
         cx, cy = tx(i), ty(row['ratio']*100)
         d = row['date'].strftime('%Y-%m-%d')
         r = row['ratio'] * 100
         tr_hover += f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="8" fill="transparent" class="tr-hover-pt" data-date="{d}" data-ratio="{r:.2f}"/>\n'
     tr_area_bottom = t_pad_t + t_plot_h
-    tr_area = f"{tx(0):.1f},{tr_area_bottom:.1f} {tr_pts} {tx(len(trend_1y)-1):.1f},{tr_area_bottom:.1f}"
+    tr_area = f"{tx(0):.1f},{tr_area_bottom:.1f} {tr_pts} {tx(len(trend_10y)-1):.1f},{tr_area_bottom:.1f}"
     buy_line_y = ty(20); sell_line_y = ty(40)
     tr_grid_lines = ""; tr_y_labels = ""
     for i in range(5):
@@ -633,9 +633,9 @@ def generate_page():
         tr_y_labels += f'<text x="{t_pad_l - 8}" y="{yy + 4:.1f}" text-anchor="end" font-size="11" fill="#6b7a8f">{val_pct:.1f}%</text>\n'
     tr_x_labels = ""
     for i in range(7):
-        idx = int((i / 6) * (len(trend_1y) - 1))
+        idx = int((i / 6) * (len(trend_10y) - 1))
         xx = tx(idx)
-        tr_x_labels += f'<text x="{xx:.1f}" y="{TH - 4}" text-anchor="middle" font-size="10" fill="#6b7a8f">{trend_1y.iloc[idx]["date"].strftime("%m-%d")}</text>\n'
+        tr_x_labels += f'<text x="{xx:.1f}" y="{TH - 4}" text-anchor="middle" font-size="10" fill="#6b7a8f">{trend_10y.iloc[idx]["date"].strftime("%Y-%m")}</text>\n'
 
     # 2025年全年比值趋势SVG
     d2025 = merged[(merged["date"] >= "2025-01-01") & (merged["date"] <= "2025-12-31")].copy().reset_index(drop=True)
@@ -730,7 +730,7 @@ def generate_page():
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>指数轮动策略 · 每日监控</title>
+<title>科技红轮动策略 · 每日监控</title>
 <style>
 :root {{
   --bg: #f5f7fa;
@@ -822,9 +822,8 @@ td:first-child {{ text-align: left; font-weight: 600; }}
 
   <!-- Header -->
   <div class="header">
-    <h1>指数轮动策略 · 每日监控</h1>
-    <div class="subtitle">创业板指 (399006) vs 中证红利低波 (H30269)</div>
-    <div class="update-time">更新于 {now_str}</div>
+    <h1>科技红轮动策略 · 每日监控</h1>
+        <div class="update-time">更新于 {now_str}</div>
   </div>
 
   <!-- Signal Card -->
@@ -893,9 +892,9 @@ td:first-child {{ text-align: left; font-weight: 600; }}
     </div>
   </div>
 
-  <!-- 1年比值趋势 -->
+  <!-- 10年比值趋势 -->
   <div class="section">
-    <div class="section-title">近1年比值趋势</div>
+    <div class="section-title">近10年比值趋势</div>
     <div class="axis-chart" style="padding:10px 0;">
       <svg viewBox="0 0 {TW} {TH}" xmlns="http://www.w3.org/2000/svg" class="trend-svg" id="trendSvg">
         {tr_grid_lines}
