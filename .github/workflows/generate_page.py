@@ -719,7 +719,7 @@ def generate_page():
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>科技红轮动策略 · 每日监控</title>
+<title>科技红利轮动策略 · 每日监控</title>
 <style>
 :root {{
   --bg: #f5f7fa;
@@ -811,7 +811,7 @@ td:first-child {{ text-align: left; font-weight: 600; }}
 
   <!-- Header -->
   <div class="header">
-    <h1>科技红轮动策略 · 每日监控</h1>
+    <h1>科技红利轮动策略 · 每日监控</h1>
         <div class="update-time">更新于 {now_str}</div>
   </div>
 
