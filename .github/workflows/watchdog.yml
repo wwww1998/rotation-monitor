@@ -1,0 +1,80 @@
+name: 更新兜底 · 看门狗
+
+# 背景：GitHub Actions 的 schedule 定时任务在平台繁忙时会延迟数小时甚至被直接丢弃，
+# 导致「每日更新监控数据」当天不执行、页面数据不刷新（如 2026-10-12 仅跑了 1 次）。
+# 本工作流在工作日收盘后每 20 分钟检查一次页面更新时间：
+# 若页面尚未按当日收盘（北京时间 15:00 之后）刷新，则自动触发一次「每日更新监控数据」补齐。
+# 正常情况（页面已更新）该工作流只做一次检查、不触发任何更新。
+
+on:
+  schedule:
+    # UTC 07:00-15:40 = 北京时间 15:00-23:40，每 20 分钟一次，仅周一至周五
+    - cron: "0,20,40 7-15 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "强制触发一次兜底（仅用于验证）"
+        type: boolean
+        default: false
+
+permissions:
+  actions: write # 用于触发「每日更新监控数据」工作流
+  contents: read
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查页面是否已按今日收盘更新
+        id: chk
+        run: |
+          now_date=$(TZ=Asia/Shanghai date +%F)
+          now_hm=$(TZ=Asia/Shanghai date +%H:%M)
+          echo "北京时间：${now_date} ${now_hm}"
+
+          stale=false
+          if [[ ! "$now_hm" < "15:00" ]]; then
+            upd=$(curl -sSL --max-time 60 -H 'Cache-Control: no-cache' \
+              "https://raw.githubusercontent.com/wwww1998/rotation-monitor/main/public/index.html" \
+              | grep -oP '更新于\s*\K\d{4}-\d{2}-\d{2} \d{2}:\d{2}' | head -1)
+            echo "页面更新时间：${upd:-未找到}"
+
+            if [ -z "$upd" ]; then
+              stale=true
+            else
+              upd_date=${upd%% *}
+              upd_hm=${upd##* }
+              if [ "$upd_date" = "$now_date" ] && [[ ! "$upd_hm" < "15:00" ]]; then
+                echo "页面已按今日收盘刷新，无需兜底"
+              else
+                echo "页面尚未按今日收盘刷新"
+                stale=true
+              fi
+            fi
+          else
+            echo "尚未到收盘时间，本次不检查"
+          fi
+
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "手动强制兜底"
+            stale=true
+          fi
+
+          echo "stale=$stale" >> "$GITHUB_OUTPUT"
+
+      - name: 兜底触发每日更新
+        if: steps.chk.outputs.stale == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          code=$(curl -sS -o /tmp/resp -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/wwww1998/rotation-monitor/actions/workflows/daily_update.yml/dispatches" \
+            -d '{"ref":"main"}')
+          echo "触发「每日更新监控数据」返回 HTTP ${code}"
+          if [ "$code" != "204" ]; then
+            cat /tmp/resp
+            exit 1
+          fi
