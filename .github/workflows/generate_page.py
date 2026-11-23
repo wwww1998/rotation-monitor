@@ -534,7 +534,8 @@ TREND_ZOOM_JS = r"""
     tlab.textContent = val.toFixed(1) + '%';
     gStatic.appendChild(tlab);
   }
-  var yBuy = Y(D.buy), ySell = Y(D.sell);
+  var buyV = isFinite(D.buy) ? D.buy : 20, sellV = isFinite(D.sell) ? D.sell : 40;
+  var yBuy = Y(buyV), ySell = Y(sellV);
   gStatic.appendChild(el('line', { x1: pl, y1: yBuy, x2: W - pr, y2: yBuy, stroke: '#4caf50', 'stroke-width': 1.5, 'stroke-dasharray': '6,3' }));
   var tb = el('text', { x: W - pr + 15, y: yBuy + 10, 'text-anchor': 'end', 'font-size': 10, fill: '#4caf50' });
   tb.textContent = '卖出红利 买入创业板 20%';
@@ -805,7 +806,7 @@ def generate_page():
         "window.__TREND_DATA__={"
         '"dates":' + json.dumps([d.strftime("%Y-%m-%d") for d in trend_10y["date"]], separators=(",", ":")) + ","
         '"ratios":' + json.dumps([round(float(v) * 100, 2) for v in trend_10y["ratio"]], separators=(",", ":")) + ","
-        f'"yMin":{tr_y_min:.2f},"yMax":{tr_y_max:.2f},"W":{TW},"H":{TH},"pl":{t_pad_l},"pr":{t_pad_r},"pt":{t_pad_t}'
+        f'"yMin":{tr_y_min:.2f},"yMax":{tr_y_max:.2f},"W":{TW},"H":{TH},"pl":{t_pad_l},"pr":{t_pad_r},"pt":{t_pad_t},"buy":20,"sell":40'
         "};"
     )
 
