@@ -7,6 +7,7 @@ import math
 import io
 import base64
 import re
+import json
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -491,6 +492,179 @@ def generate_chart(nav_df, trades, max_dd, title_suffix='', hover_prefix='nav', 
     return svg
 
 # ─── 主页面生成 ────────────────────────────────────────────────
+# 近10年比值趋势图：滚轮缩放 / 拖拽平移 / 悬停读数
+TREND_ZOOM_JS = r"""
+(function () {
+  var D = window.__TREND_DATA__;
+  var svg = document.getElementById('trendSvg');
+  var tooltip = document.getElementById('trTooltip');
+  if (!D || !svg || !tooltip) return;
+
+  var W = D.W, H = D.H, pl = D.pl, pr = D.pr, pt = D.pt;
+  var plotW = W - pl - pr, plotH = H - pt - 30, bottom = pt + plotH;
+  var dates = D.dates, ratios = D.ratios, n = dates.length;
+  if (!n) return;
+  var NS = 'http://www.w3.org/2000/svg';
+
+  // 缩放窗口（索引区间）
+  var st = { i0: 0, i1: n - 1 };
+
+  function X(i) { return pl + (i - st.i0) / Math.max(1e-9, st.i1 - st.i0) * plotW; }
+  function Y(v) { var r = (D.yMax - D.yMin) || 1; return pt + plotH - (v - D.yMin) / r * plotH; }
+  function invX(px) { return st.i0 + (px - pl) / plotW * (st.i1 - st.i0); }
+
+  function el(name, attrs) {
+    var e = document.createElementNS(NS, name);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  // ── 图层：静态网格/阈值线、数据、X轴标签、十字线、事件层 ──
+  svg.innerHTML = '';
+  var gStatic = el('g', {}), gData = el('g', {}), gXlab = el('g', {});
+  var gCross = el('g', { opacity: '0' });
+  var crossLine = el('line', { stroke: '#1a2332', 'stroke-width': 1, opacity: '0.4' });
+  var crossDot = el('circle', { r: 4.5, fill: '#2563eb', stroke: '#fff', 'stroke-width': 2 });
+
+  for (var gi = 0; gi < 5; gi++) {
+    var val = D.yMax - (gi / 4) * (D.yMax - D.yMin);
+    var yy = Y(val);
+    gStatic.appendChild(el('line', { x1: pl, y1: yy, x2: W - pr, y2: yy, stroke: '#e2e8f0', 'stroke-width': 1 }));
+    var tlab = el('text', { x: pl - 8, y: yy + 4, 'text-anchor': 'end', 'font-size': 11, fill: '#6b7a8f' });
+    tlab.textContent = val.toFixed(1) + '%';
+    gStatic.appendChild(tlab);
+  }
+  var yBuy = Y(D.buy), ySell = Y(D.sell);
+  gStatic.appendChild(el('line', { x1: pl, y1: yBuy, x2: W - pr, y2: yBuy, stroke: '#4caf50', 'stroke-width': 1.5, 'stroke-dasharray': '6,3' }));
+  var tb = el('text', { x: W - pr + 15, y: yBuy + 10, 'text-anchor': 'end', 'font-size': 10, fill: '#4caf50' });
+  tb.textContent = '卖出红利 买入创业板 20%';
+  gStatic.appendChild(tb);
+  gStatic.appendChild(el('line', { x1: pl, y1: ySell, x2: W - pr, y2: ySell, stroke: '#f44336', 'stroke-width': 1.5, 'stroke-dasharray': '6,3' }));
+  var ts = el('text', { x: W - pr + 15, y: ySell - 2, 'text-anchor': 'end', 'font-size': 10, fill: '#f44336' });
+  ts.textContent = '买入红利 卖出创业板 40%';
+  gStatic.appendChild(ts);
+
+  gCross.appendChild(crossLine);
+  gCross.appendChild(crossDot);
+  var overlay = el('rect', { x: pl, y: pt, width: plotW, height: plotH, fill: 'transparent', 'pointer-events': 'all' });
+
+  svg.appendChild(gStatic);
+  svg.appendChild(gData);
+  svg.appendChild(gXlab);
+  svg.appendChild(gCross);
+  svg.appendChild(overlay);
+
+  function render() {
+    var i0 = Math.max(0, Math.floor(st.i0));
+    var i1 = Math.min(n - 1, Math.ceil(st.i1));
+    var step = Math.max(1, Math.ceil((i1 - i0) / 1400));
+    var arr = [];
+    for (var i = i0; i <= i1; i += step) arr.push(X(i).toFixed(1) + ',' + Y(ratios[i]).toFixed(1));
+    if (i1 > i0 && (i1 - i0) % step) arr.push(X(i1).toFixed(1) + ',' + Y(ratios[i1]).toFixed(1));
+    var s = arr.join(' ');
+    var x0 = X(Math.max(0, st.i0)).toFixed(1);
+    var x1 = X(Math.min(n - 1, st.i1)).toFixed(1);
+    gData.innerHTML =
+      '<polygon points="' + x0 + ',' + bottom + ' ' + s + ' ' + x1 + ',' + bottom + '" fill="rgba(37,99,235,0.1)"/>' +
+      '<polyline points="' + s + '" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round"/>';
+
+    var out = '';
+    for (var k = 0; k < 7; k++) {
+      var idx = Math.round(st.i0 + (st.i1 - st.i0) * k / 6);
+      idx = Math.max(0, Math.min(n - 1, idx));
+      var xx = Math.max(pl, Math.min(W - pr, X(idx)));
+      out += '<text x="' + xx.toFixed(1) + '" y="' + (H - 4) +
+        '" text-anchor="middle" font-size="10" fill="#6b7a8f">' + dates[idx].slice(0, 7) + '</text>';
+    }
+    gXlab.innerHTML = out;
+  }
+
+  function hoverAt(clientX) {
+    var r = svg.getBoundingClientRect();
+    var px = (clientX - r.left) / (r.width || 1) * W;
+    var i = Math.round(invX(px));
+    if (i < 0) i = 0;
+    if (i > n - 1) i = n - 1;
+    var cx = X(i), cy = Y(ratios[i]);
+    crossLine.setAttribute('x1', cx);
+    crossLine.setAttribute('x2', cx);
+    crossLine.setAttribute('y1', pt);
+    crossLine.setAttribute('y2', bottom);
+    crossDot.setAttribute('cx', cx);
+    crossDot.setAttribute('cy', cy);
+    gCross.setAttribute('opacity', '1');
+    tooltip.innerHTML = dates[i] + ' | 比值 ' + ratios[i].toFixed(2) + '%';
+    tooltip.style.display = 'block';
+  }
+
+  function hideHover() {
+    gCross.setAttribute('opacity', '0');
+    tooltip.style.display = 'none';
+  }
+
+  function clampWin() {
+    var span = st.i1 - st.i0;
+    if (span >= n - 1) { st.i0 = 0; st.i1 = n - 1; return; }
+    if (st.i0 < 0) { st.i0 = 0; st.i1 = span; }
+    if (st.i1 > n - 1) { st.i1 = n - 1; st.i0 = n - 1 - span; }
+  }
+
+  // 滚轮缩放（以光标为锚点）；挂在容器上，避免空白区域不响应
+  var host = svg.parentNode || svg;
+  host.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    var r = svg.getBoundingClientRect();
+    var px = (e.clientX - r.left) / (r.width || 1) * W;
+    px = Math.max(pl, Math.min(W - pr, px));
+    var pivot = Math.max(st.i0, Math.min(st.i1, invX(px)));
+    var f = e.deltaY > 0 ? 1.2 : 1 / 1.2;
+    var span = (st.i1 - st.i0) * f;
+    var minSpan = Math.max(10, (n - 1) * 0.012);
+    if (span < minSpan) span = minSpan;
+    if (span > n - 1) span = n - 1;
+    var frac = (pivot - st.i0) / Math.max(1e-9, st.i1 - st.i0);
+    st.i0 = pivot - frac * span;
+    st.i1 = st.i0 + span;
+    clampWin();
+    render();
+    hideHover();
+  }, { passive: false });
+
+  // 拖拽平移
+  var drag = null;
+  svg.addEventListener('pointerdown', function (e) {
+    drag = { x: e.clientX, i0: st.i0, i1: st.i1 };
+    try { svg.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  svg.addEventListener('pointermove', function (e) {
+    if (drag) {
+      var r = svg.getBoundingClientRect();
+      var dIdx = (e.clientX - drag.x) / (r.width || 1) * W / plotW * (drag.i1 - drag.i0);
+      st.i0 = drag.i0 - dIdx;
+      st.i1 = drag.i1 - dIdx;
+      clampWin();
+      render();
+      hideHover();
+    } else {
+      hoverAt(e.clientX);
+    }
+  });
+  svg.addEventListener('pointerup', function (e) {
+    drag = null;
+    try { svg.releasePointerCapture(e.pointerId); } catch (err) {}
+  });
+  svg.addEventListener('pointercancel', function () { drag = null; });
+  svg.addEventListener('pointerleave', function () { drag = null; hideHover(); });
+  // 双击还原
+  svg.addEventListener('dblclick', function () { st.i0 = 0; st.i1 = n - 1; render(); });
+
+  svg.style.cursor = 'crosshair';
+  svg.style.touchAction = 'none';
+  render();
+})();
+"""
+
+
 def generate_page():
     print("正在获取指数数据...")
 
@@ -625,6 +799,15 @@ def generate_page():
         idx = int((i / 6) * (len(trend_10y) - 1))
         xx = tx(idx)
         tr_x_labels += f'<text x="{xx:.1f}" y="{TH - 4}" text-anchor="middle" font-size="10" fill="#6b7a8f">{trend_10y.iloc[idx]["date"].strftime("%Y-%m")}</text>\n'
+
+    # 供前端滚轮缩放 / 悬停重绘使用的数据
+    trend_data_js = (
+        "window.__TREND_DATA__={"
+        '"dates":' + json.dumps([d.strftime("%Y-%m-%d") for d in trend_10y["date"]], separators=(",", ":")) + ","
+        '"ratios":' + json.dumps([round(float(v) * 100, 2) for v in trend_10y["ratio"]], separators=(",", ":")) + ","
+        f'"yMin":{tr_y_min:.2f},"yMax":{tr_y_max:.2f},"W":{TW},"H":{TH},"pl":{t_pad_l},"pr":{t_pad_r},"pt":{t_pad_t}'
+        "};"
+    )
 
     # 2025年全年比值趋势SVG
     d2025 = merged[(merged["date"] >= "2025-01-01") & (merged["date"] <= "2025-12-31")].copy().reset_index(drop=True)
@@ -900,6 +1083,7 @@ td:first-child {{ text-align: left; font-weight: 600; }}
         {tr_x_labels}
       </svg>
       <div id="trTooltip" style="position:absolute;display:none;pointer-events:none;background:#1a2332;color:white;padding:6px 12px;border-radius:6px;font-size:13px;z-index:10;white-space:nowrap;left:50%;transform:translateX(-50%);top:0;"></div>
+      <div style="text-align:center;font-size:11px;color:#94a3b8;margin-top:4px;">滚轮缩放 · 拖拽平移 · 双击还原</div>
     </div>
   </div>
 
@@ -1017,64 +1201,11 @@ td:first-child {{ text-align: left; font-weight: 600; }}
     </div>
   </div>
 
-  <!-- 悬停交互脚本 -->
+  <!-- 10年比值趋势：滚轮缩放 + 拖拽平移 + 悬停读数 -->
   <script>
-  (function() {{
-    var svg = document.getElementById('trendSvg');
-    var tooltip = document.getElementById('trTooltip');
-    var hLine = document.getElementById('trHoverLine');
-    var hDot = document.getElementById('trHoverDot');
-    var pts = document.querySelectorAll('.tr-hover-pt');
-    if (!svg || !tooltip) return;
-    var svgRect;
-    function updateRect() {{ svgRect = svg.getBoundingClientRect(); }}
-    pts.forEach(function(pt) {{
-      pt.addEventListener('mouseenter', function(e) {{
-        updateRect();
-        var cx = parseFloat(pt.getAttribute('cx'));
-        var cy = parseFloat(pt.getAttribute('cy'));
-        var date = pt.getAttribute('data-date');
-        var ratio = pt.getAttribute('data-ratio');
-        // 显示竖线和圆点
-        hLine.setAttribute('x1', cx);
-        hLine.setAttribute('x2', cx);
-        hDot.setAttribute('cx', cx);
-        hDot.setAttribute('cy', cy);
-        hLine.setAttribute('opacity', '0.4');
-        hDot.setAttribute('opacity', '1');
-        // tooltip固定在图的上部中间
-        tooltip.innerHTML = date + ' | 比值 ' + ratio + '%';
-        tooltip.style.display = 'block';
-      }});
-      pt.addEventListener('mouseleave', function() {{
-        hLine.setAttribute('opacity', '0');
-        hDot.setAttribute('opacity', '0');
-        tooltip.style.display = 'none';
-      }});
-    }});
-    // 移动端touch支持
-    svg.addEventListener('touchmove', function(e) {{
-      e.preventDefault();
-      updateRect();
-      var touch = e.touches[0];
-      var x = (touch.clientX - svgRect.left) / svgRect.width * {TW};
-      var closest = null, minDist = 999;
-      pts.forEach(function(pt) {{
-        var pcx = parseFloat(pt.getAttribute('cx'));
-        var d = Math.abs(pcx - x);
-        if (d < minDist) {{ minDist = d; closest = pt; }}
-      }});
-      if (closest && minDist < 15) {{
-        var ev = new Event('mouseenter');
-        closest.dispatchEvent(ev);
-      }}
-    }});
-    svg.addEventListener('touchend', function() {{
-      hLine.setAttribute('opacity', '0');
-      hDot.setAttribute('opacity', '0');
-      tooltip.style.display = 'none';
-    }});
-  }})();
+  {trend_data_js}
+  {TREND_ZOOM_JS}
+  </script>
 
   // 三面板联动悬停指标（资产/比值/回撤 十字线联动）
   (function() {{
