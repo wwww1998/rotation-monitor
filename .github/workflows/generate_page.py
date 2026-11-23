@@ -1207,6 +1207,7 @@ td:first-child {{ text-align: left; font-weight: 600; }}
   {TREND_ZOOM_JS}
   </script>
 
+  <script>
   // 三面板联动悬停指标（资产/比值/回撤 十字线联动）
   (function() {{
     var wrap = document.querySelector('.chart-wrap');
